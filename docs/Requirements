@@ -1,0 +1,58 @@
+1. Core Requirements & Technical Approach
+Identity & Security Management:
+
+Requirements: User registration, login, password reset, and profile updates.
+
+Technical Implementation: ASP.NET Core Identity combined with JWT (JSON Web Tokens). We will implement a Refresh Token rotation strategy to ensure a seamless, secure user experience without abrupt session terminations.
+
+Core Domain (Courses, Tasks & Notes):
+
+Requirements: Create/edit/delete courses, manage tasks and their statuses, and create notes.
+
+Technical Implementation: Standard RESTful APIs backed by Entity Framework Core (EF Core). We will strictly enforce a Soft Delete pattern (e.g., IsDeleted = true) for courses to prevent accidental cascading deletion of critical tasks and notes.
+
+Data Aggregation (Dashboard):
+
+Requirements: A unified view of all active courses and pending tasks.
+
+Technical Implementation: A dedicated, read-only endpoint utilizing LINQ Projections. This ensures we fetch exactly what the client needs in a single database query, actively preventing the notorious N+1 query problem and eliminating data over-fetching.
+
+External AI Service Integration:
+
+Requirements: Transform raw, unstructured user notes into actionable, organized tasks.
+
+Technical Implementation: Asynchronous API integration utilizing a lightweight, high-speed model like Gemini Flash 3.7. This ensures low-latency processing and prevents blocking the main server thread while handling AI requests.
+
+2. Proposed Dashboard Data Structure (DTO)
+To ensure our frontend receives an optimized payload, the Dashboard API response should be structured cleanly. Here is the proposed JSON schema:
+
+JSON
+{
+  "userSummary": { 
+    "fullName": "John Doe", 
+    "email": "john.doe@example.com" 
+  },
+  "weeklyStatistics": { 
+    "totalActiveCourses": 3, 
+    "pendingTasks": 7, 
+    "completedTasks": 12 
+  },
+  "urgentTasks": [
+    { 
+      "taskId": 105, 
+      "title": "Submit Software Engineering Project", 
+      "dueDate": "2026-08-25T23:59:00Z", 
+      "courseName": "Software Architecture" 
+    }
+  ],
+  "activeCoursesOverview": [
+    { 
+      "courseId": 12, 
+      "name": "Software Architecture", 
+      "tasksLeft": 2 
+    }
+  ]
+}
+This specific structure fulfills the aggregation requirement perfectly—delivering maximum contextual value to the user in a single HTTP request.
+
+Does this data structure align with the final vision you have for the application's landing page, or are there specific metrics missing that we must account for before I map out the database Entity-Relationship Diagram (ERD)?
