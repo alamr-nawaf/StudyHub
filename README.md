@@ -1,1 +1,50 @@
 # StudyHub
+
+StudyHub API - Engineering Brief & PRD (Milestone 1)
+1. Project Vision
+StudyHub is a robust, scalable backend system designed to manage educational resources, tasks, and notes. The project integrates traditional RESTful operations with external AI services, adhering strictly to Clean Architecture principles and industry-standard Software Development Life Cycle (SDLC) practices.
+
+2. Core Use Cases (User Stories)
+👤 Identity & Access Management
+UC-01: As a user, I can register and log in securely so that my data is protected.
+
+UC-02: As a user, my session remains active seamlessly via Refresh Tokens without requiring frequent manual logins.
+
+📚 Course & Task Management (Core Domain)
+UC-03: As a user, I can create, edit, and archive (soft-delete) courses.
+
+UC-04: As a user, I can create tasks under a specific course and track their status (Pending, InProgress, Completed).
+
+UC-05: As a system, archiving a course will hide its associated tasks without permanently deleting them from the database (Soft-Delete Cascade prevention).
+
+🤖 AI Integration & FinOps (Cost Control)
+UC-06: As a user, I can submit my raw notes to an AI service to extract structured, actionable tasks.
+
+UC-07: As a system, I will enforce a daily AI Request Quota and API Rate Limiting per user to prevent resource abuse and manage external API costs.
+
+📊 Data Aggregation
+UC-08: As a frontend application, I can fetch a comprehensive user dashboard (statistics, active courses, urgent tasks) via a single optimized endpoint to eliminate N+1 queries.
+
+3. Architectural Decisions (ADRs)
+Component	Decision / Technology	Rationale
+Framework	C# / .NET 10	High performance, strong typing, and enterprise readiness.
+Architecture	Clean Architecture (4 Layers)	Ensures Separation of Concerns, testability, and framework independence.
+Database ORM	Entity Framework Core (Code-First)	Rapid development with strong LINQ projection capabilities.
+Security	JWT + Refresh Tokens	Stateless authentication with seamless UX.
+AI Integration	Gemini AI (Asynchronous API)	Human-in-the-loop approach: AI suggests tasks; user approves before DB insertion.
+
+4. Database Schema Freeze (v1.0)
+The data model has been finalized with the following core entities:
+
+Users: Id, FullName, Email, AiRequestsCount, LastAiRequestDate (Quota tracking included), CreatedAt.
+
+Courses: Id, UserId (FK), Title, Description, IsDeleted (Soft Delete), CreatedAt.
+
+Tasks: Id, CourseId (FK), Title, DueDate, Status, CreatedAt.
+
+Notes: Id, UserId (FK), CourseId (Nullable FK), Content, CreatedAt.
+
+5. Upcoming Milestones
+[Pending] Milestone 2: Initialize .NET Solution & Clean Architecture layers.
+
+[Pending] Milestone 3: Implement Domain Entities & EF Core DbContext.
