@@ -1,58 +1,48 @@
-1. Core Requirements & Technical Approach
-Identity & Security Management:
+StudyHub API - Engineering Brief & PRD (Milestone 1)
+1. Project Vision
+StudyHub is a robust, scalable backend system designed to manage educational resources, tasks, and notes. The project integrates traditional RESTful operations with external AI services, adhering strictly to Clean Architecture principles and industry-standard Software Development Life Cycle (SDLC) practices.
 
-Requirements: User registration, login, password reset, and profile updates.
+2. Core Use Cases (User Stories)
+👤 Identity & Access Management
+UC-01: As a user, I can register and log in securely so that my data is protected.
 
-Technical Implementation: ASP.NET Core Identity combined with JWT (JSON Web Tokens). We will implement a Refresh Token rotation strategy to ensure a seamless, secure user experience without abrupt session terminations.
+UC-02: As a user, my session remains active seamlessly via Refresh Tokens without requiring frequent manual logins.
 
-Core Domain (Courses, Tasks & Notes):
+📚 Course & Task Management (Core Domain)
+UC-03: As a user, I can create, edit, and archive (soft-delete) courses.
 
-Requirements: Create/edit/delete courses, manage tasks and their statuses, and create notes.
+UC-04: As a user, I can create tasks under a specific course and track their status (Pending, InProgress, Completed).
 
-Technical Implementation: Standard RESTful APIs backed by Entity Framework Core (EF Core). We will strictly enforce a Soft Delete pattern (e.g., IsDeleted = true) for courses to prevent accidental cascading deletion of critical tasks and notes.
+UC-05: As a system, archiving a course will hide its associated tasks without permanently deleting them from the database (Soft-Delete Cascade prevention).
 
-Data Aggregation (Dashboard):
+🤖 AI Integration & FinOps (Cost Control)
+UC-06: As a user, I can submit my raw notes to an AI service to extract structured, actionable tasks.
 
-Requirements: A unified view of all active courses and pending tasks.
+UC-07: As a system, I will enforce a daily AI Request Quota and API Rate Limiting per user to prevent resource abuse and manage external API costs.
 
-Technical Implementation: A dedicated, read-only endpoint utilizing LINQ Projections. This ensures we fetch exactly what the client needs in a single database query, actively preventing the notorious N+1 query problem and eliminating data over-fetching.
+📊 Data Aggregation
+UC-08: As a frontend application, I can fetch a comprehensive user dashboard (statistics, active courses, urgent tasks) via a single optimized endpoint to eliminate N+1 queries.
 
-External AI Service Integration:
+3. Architectural Decisions (ADRs)
+Component	Decision / Technology	Rationale
+Framework	C# / .NET 10	High performance, strong typing, and enterprise readiness.
+Architecture	Clean Architecture (4 Layers)	Ensures Separation of Concerns, testability, and framework independence.
+Database ORM	Entity Framework Core (Code-First)	Rapid development with strong LINQ projection capabilities.
+Security	JWT + Refresh Tokens	Stateless authentication with seamless UX.
+AI Integration	Gemini AI (Asynchronous API)	Human-in-the-loop approach: AI suggests tasks; user approves before DB insertion.
 
-Requirements: Transform raw, unstructured user notes into actionable, organized tasks.
+4. Database Schema Freeze (v1.0)
+The data model has been finalized with the following core entities:
 
-Technical Implementation: Asynchronous API integration utilizing a lightweight, high-speed model like Gemini Flash 3.7. This ensures low-latency processing and prevents blocking the main server thread while handling AI requests.
+Users: Id, FullName, Email, AiRequestsCount, LastAiRequestDate (Quota tracking included), CreatedAt.
 
-2. Proposed Dashboard Data Structure (DTO)
-To ensure our frontend receives an optimized payload, the Dashboard API response should be structured cleanly. Here is the proposed JSON schema:
+Courses: Id, UserId (FK), Title, Description, IsDeleted (Soft Delete), CreatedAt.
 
-JSON
-{
-  "userSummary": { 
-    "fullName": "John Doe", 
-    "email": "john.doe@example.com" 
-  },
-  "weeklyStatistics": { 
-    "totalActiveCourses": 3, 
-    "pendingTasks": 7, 
-    "completedTasks": 12 
-  },
-  "urgentTasks": [
-    { 
-      "taskId": 105, 
-      "title": "Submit Software Engineering Project", 
-      "dueDate": "2026-08-25T23:59:00Z", 
-      "courseName": "Software Architecture" 
-    }
-  ],
-  "activeCoursesOverview": [
-    { 
-      "courseId": 12, 
-      "name": "Software Architecture", 
-      "tasksLeft": 2 
-    }
-  ]
-}
-This specific structure fulfills the aggregation requirement perfectly—delivering maximum contextual value to the user in a single HTTP request.
+Tasks: Id, CourseId (FK), Title, DueDate, Status, CreatedAt.
 
-Does this data structure align with the final vision you have for the application's landing page, or are there specific metrics missing that we must account for before I map out the database Entity-Relationship Diagram (ERD)?
+Notes: Id, UserId (FK), CourseId (Nullable FK), Content, CreatedAt.
+
+5. Upcoming Milestones
+[Pending] Milestone 2: Initialize .NET Solution & Clean Architecture layers.
+
+[Pending] Milestone 3: Implement Domain Entities & EF Core DbContext.
