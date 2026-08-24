@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="StudyHub.API/StudyHub.API.csproj" />
+  <Project Path="StudyHub.Application/StudyHub.Application.csproj" />
+  <Project Path="StudyHub.Domain/StudyHub.Domain.csproj" />
+  <Project Path="StudyHub.Infrastructure/StudyHub.Infrastructure.csproj" />
+</Solution>
