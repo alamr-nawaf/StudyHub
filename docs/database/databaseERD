@@ -1,0 +1,50 @@
+erDiagram
+    USERS ||--o{ COURSES : "has"
+    USERS ||--o{ NOTES : "writes"
+    USERS ||--o{ AI_USAGE_LOGS : "generates"
+    COURSES ||--o{ TASKS : "contains"
+    COURSES ||--o{ NOTES : "associated with"
+
+    USERS {
+        uniqueidentifier Id PK
+        string FullName
+        string Email
+        string PasswordHash
+        int MonthlyTokenQuota
+        int TokensUsedThisMonth
+        datetime LastTokenResetDate
+        datetime CreatedAt
+    }
+
+    COURSES {
+        uniqueidentifier Id PK
+        uniqueidentifier UserId FK
+        string Title
+        string Description
+        boolean IsDeleted
+        datetime CreatedAt
+    }
+
+    TASKS {
+        uniqueidentifier Id PK
+        uniqueidentifier CourseId FK
+        string Title
+        datetime DueDate
+        int Status
+        datetime CreatedAt
+    }
+
+    NOTES {
+        uniqueidentifier Id PK
+        uniqueidentifier UserId FK
+        uniqueidentifier CourseId FK "Nullable"
+        string Content
+        datetime CreatedAt
+    }
+
+    AI_USAGE_LOGS {
+        uniqueidentifier Id PK
+        uniqueidentifier UserId FK
+        int TokensConsumed
+        datetime OperationDate
+    }
