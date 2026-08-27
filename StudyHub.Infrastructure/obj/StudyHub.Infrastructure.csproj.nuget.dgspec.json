@@ -748,9 +748,9 @@
               "target": "Package",
               "version": "[10.0.11, )"
             },
-            "Microsoft.EntityFrameworkCore.SqlServer": {
+            "Npgsql.EntityFrameworkCore.PostgreSQL": {
               "target": "Package",
-              "version": "[10.0.11, )"
+              "version": "[10.0.3, )"
             }
           },
           "imports": [

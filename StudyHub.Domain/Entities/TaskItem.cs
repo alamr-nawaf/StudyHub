@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using StudyHub.Domain.Common;
+﻿using StudyHub.Domain.Common;
 using StudyHub.Domain.Enums;
 
 namespace StudyHub.Domain.Entities;

@@ -1,9 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Identity.Client.NativeInterop;
 using StudyHub.Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Text;
+
 
 namespace StudyHub.Infrastructure.Data;
 
@@ -26,8 +23,6 @@ public class StudyHubDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // هذه الدالة السحرية ستبحث في المشروع عن أي كلاس يطبق IEntityTypeConfiguration
-        // وتنفذ إعداداته تلقائياً، مما يحافظ على نظافة ملف الـ DbContext
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(StudyHubDbContext).Assembly);
     }
 }
