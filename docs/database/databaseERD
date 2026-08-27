@@ -1,9 +1,12 @@
 erDiagram
-    USERS ||--o{ COURSES : "has"
+    USERS ||--o{ COURSES : "creates"
     USERS ||--o{ NOTES : "writes"
+    USERS ||--o{ TASKS : "owns"
     USERS ||--o{ AI_USAGE_LOGS : "generates"
-    COURSES ||--o{ TASKS : "contains"
-    COURSES ||--o{ NOTES : "associated with"
+    USERS ||--o{ REFRESH_TOKENS : "secures session"
+    COURSES ||--o{ TASKS : "groups"
+    COURSES ||--o{ NOTES : "contextualizes"
+    NOTES ||--o{ TASKS : "source of"
 
     USERS {
         uniqueidentifier Id PK
@@ -13,6 +16,17 @@ erDiagram
         int MonthlyTokenQuota
         int TokensUsedThisMonth
         datetime LastTokenResetDate
+        boolean IsActive
+        datetime CreatedAt
+        datetime UpdatedAt
+    }
+
+    REFRESH_TOKENS {
+        uniqueidentifier Id PK
+        uniqueidentifier UserId FK
+        string Token
+        datetime ExpiresAt
+        datetime RevokedAt "Nullable"
         datetime CreatedAt
     }
 
@@ -20,31 +34,42 @@ erDiagram
         uniqueidentifier Id PK
         uniqueidentifier UserId FK
         string Title
-        string Description
+        string Description "Nullable"
         boolean IsDeleted
         datetime CreatedAt
-    }
-
-    TASKS {
-        uniqueidentifier Id PK
-        uniqueidentifier CourseId FK
-        string Title
-        datetime DueDate
-        int Status
-        datetime CreatedAt
+        datetime UpdatedAt
     }
 
     NOTES {
         uniqueidentifier Id PK
         uniqueidentifier UserId FK
         uniqueidentifier CourseId FK "Nullable"
+        string Title
         string Content
+        boolean IsDeleted
         datetime CreatedAt
+        datetime UpdatedAt
+    }
+
+    TASKS {
+        uniqueidentifier Id PK
+        uniqueidentifier UserId FK
+        uniqueidentifier CourseId FK "Nullable"
+        uniqueidentifier SourceNoteId FK "Nullable"
+        string Title
+        string Description "Nullable"
+        int Status
+        int Priority
+        datetime DueDate "Nullable"
+        boolean IsDeleted
+        datetime CreatedAt
+        datetime UpdatedAt
     }
 
     AI_USAGE_LOGS {
         uniqueidentifier Id PK
         uniqueidentifier UserId FK
+        string OperationType
         int TokensConsumed
         datetime OperationDate
     }
