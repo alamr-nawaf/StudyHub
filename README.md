@@ -45,6 +45,9 @@ Tasks: Id, CourseId (FK), Title, DueDate, Status, CreatedAt.
 Notes: Id, UserId (FK), CourseId (Nullable FK), Content, CreatedAt.
 
 5. Upcoming Milestones
-[Pending] Milestone 2: Initialize .NET Solution & Clean Architecture layers.
-
-[Pending] Milestone 3: Implement Domain Entities & EF Core DbContext.
+5. Progress Status
+[Done] Milestone 2: .NET Solution & Clean Architecture layers initialized.
+[Done] Milestone 3: Domain Entities, EF Core DbContext, and full relational schema (Foreign Keys + Indexes) implemented.
+[Pending] Milestone 4: Authentication (JWT + Refresh Tokens).
+[Pending] Milestone 5: Controllers & DTOs for Courses, Tasks, Notes.
+[Pending] Milestone 6: AI Integration (Gemini) + Quota enforcement.

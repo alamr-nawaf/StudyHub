@@ -9,9 +9,8 @@ public class StudyHubDbContextFactory : IDesignTimeDbContextFactory<StudyHubDbCo
     {
         var optionsBuilder = new DbContextOptionsBuilder<StudyHubDbContext>();
 
-        // هذا النص مخصص فقط لعمليات Migration وقت التطوير والتخطيط
-        // تأكد من مطابقة كلمة المرور لما وضعته في ملف docker-compose.yml
-        var connectionString = "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword";
+        var connectionString = Environment.GetEnvironmentVariable("STUDYHUB_DB_CONNECTION")
+            ?? "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword";
 
         optionsBuilder.UseNpgsql(connectionString);
 
