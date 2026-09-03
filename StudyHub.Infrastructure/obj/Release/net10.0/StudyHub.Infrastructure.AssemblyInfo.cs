@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("StudyHub.Infrastructure")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c054d741e03a20888b8f0b66bdf3941cbbcf4e7f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1420afd2ec4159b043c06a2bb93f5e6ef5bb295a")]
 [assembly: System.Reflection.AssemblyProductAttribute("StudyHub.Infrastructure")]
 [assembly: System.Reflection.AssemblyTitleAttribute("StudyHub.Infrastructure")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

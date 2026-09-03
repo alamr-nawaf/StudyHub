@@ -16,5 +16,15 @@ public class NoteConfiguration : IEntityTypeConfiguration<Note>
         builder.HasQueryFilter(n => !n.IsDeleted);
 
         builder.ToTable("Notes", t => t.HasCheckConstraint("CK_Note_TitleOrContent", "\"Title\" IS NOT NULL OR \"Content\" IS NOT NULL"));
+        builder.HasOne<User>()
+       .WithMany()
+       .HasForeignKey(n => n.UserId)
+       .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<Course>()
+               .WithMany()
+               .HasForeignKey(n => n.CourseId)
+               .OnDelete(DeleteBehavior.SetNull); // Course اختياري، فلو انحذف الكورس، الملاحظة تبقى بس بدون كورس
     }
+
 }

@@ -19,5 +19,16 @@ public class TaskItemConfiguration : IEntityTypeConfiguration<TaskItem>
                .WithMany()
                .HasForeignKey(t => t.UserId)
                .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<Course>()
+                .WithMany()
+                .HasForeignKey(t => t.CourseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<Note>()
+               .WithMany()
+               .HasForeignKey(t => t.SourceNoteId)
+               .OnDelete(DeleteBehavior.SetNull);
+
     }
 }
