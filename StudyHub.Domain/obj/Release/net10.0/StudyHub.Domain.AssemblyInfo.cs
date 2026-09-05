@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("StudyHub.Domain")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c054d741e03a20888b8f0b66bdf3941cbbcf4e7f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5c4236b6ecd2542fe38809f845fc05407d1935b3")]
 [assembly: System.Reflection.AssemblyProductAttribute("StudyHub.Domain")]
 [assembly: System.Reflection.AssemblyTitleAttribute("StudyHub.Domain")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

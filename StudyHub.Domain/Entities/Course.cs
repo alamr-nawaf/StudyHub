@@ -24,7 +24,15 @@ public sealed class Course : BaseEntity
             IsDeleted = false
         };
     }
+    public void UpdateDetails(string title, string? description)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Course title cannot be empty.");
 
+        Title = title;
+        Description = description;
+        UpdatedAt = DateTime.UtcNow;
+    }
     public void MarkAsDeleted()
     {
         IsDeleted = true;

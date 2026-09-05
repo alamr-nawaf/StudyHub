@@ -44,8 +44,8 @@ erDiagram
         uniqueidentifier Id PK
         uniqueidentifier UserId FK
         uniqueidentifier CourseId FK "Nullable"
-        string Title
-        string Content
+        string Title "Nullable"
+        string Content "Nullable"
         boolean IsDeleted
         datetime CreatedAt
         datetime UpdatedAt

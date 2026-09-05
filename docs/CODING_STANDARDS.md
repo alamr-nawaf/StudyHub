@@ -26,6 +26,7 @@ Private Fields: Use camelCase prefixed with an underscore (e.g., _dbContext).
 RESTful Compliance: Controllers must adhere to standard HTTP verbs (GET, POST, PUT, DELETE) and return appropriate status codes (e.g., 201 Created, 404 Not Found, 204 No Content).
 
 Global Exception Handling: Do not use try-catch blocks in controllers for standard domain exceptions. Implement a centralized Global Exception Handling Middleware to intercept errors and return a standardized JSON response.
+Validation Errors: FluentValidation's ValidationException must be caught by the Global Exception Handling Middleware and mapped to HTTP 400 Bad Request with a structured list of field errors.
 
 Data Transfer Objects (DTOs): Never expose domain entities directly through the API. Always map entities to DTOs before returning them to the client.
 
@@ -33,3 +34,18 @@ Data Transfer Objects (DTOs): Never expose domain entities directly through the 
 Branching Strategy: Direct commits to the main branch are prohibited. Create branches using the format: feature/[ticket-name], bugfix/[ticket-name], or chore/[ticket-name].
 
 Commit Messages: Follow Conventional Commits formatting (e.g., feat(domain): add task entity, fix(api): resolve token validation error).
+
+6. CQRS & MediatR Conventions
+Naming: Commands and Queries use the pattern {Verb}{Entity}Command / {Verb}{Entity}Query
+(e.g., CreateCourseCommand, GetCoursesByUserQuery).
+
+Handlers: Suffix with Handler (e.g., CreateCourseCommandHandler). One handler class = one use case, no shared logic between handlers beyond what lives in Domain/repositories.
+
+Validators: Suffix with Validator (e.g., CreateCourseCommandValidator), placed in the same feature folder as its Command/Query — never centralized in one giant file.
+
+7. Testing Standards
+Naming: MethodName_Scenario_ExpectedResult (e.g., Course_Create_WithEmptyTitle_ShouldThrowArgumentException).
+
+Structure: Follow Arrange-Act-Assert (AAA) in every test, separated by a blank line.
+
+Mocking: Only mock interfaces defined in Application (e.g., ICourseRepository). Never mock the entity under test itself.
