@@ -1,48 +1,215 @@
-StudyHub API - Engineering Brief & PRD (Milestone 1)
-1. Project Vision
+# StudyHub — Engineering Requirements (PRD) v1.1
+
+## 1. Project Vision
+
 StudyHub is a robust, scalable backend system designed to manage educational resources, tasks, and notes. The project integrates traditional RESTful operations with external AI services, adhering strictly to Clean Architecture principles and industry-standard Software Development Life Cycle (SDLC) practices.
 
-2. Core Use Cases (User Stories)
-👤 Identity & Access Management
-UC-01: As a user, I can register and log in securely so that my data is protected.
+This is a personal learning project — the primary goal is to practice professional .NET backend engineering patterns and workflows, not just to ship a working app.
 
-UC-02: As a user, my session remains active seamlessly via Refresh Tokens without requiring frequent manual logins.
+---
 
-📚 Course & Task Management (Core Domain)
-UC-03: As a user, I can create, edit, and archive (soft-delete) courses.
+## 2. Core Use Cases (User Stories)
 
-UC-04: As a user, I can create tasks under a specific course and track their status (Pending, InProgress, Completed).
+### 👤 Identity & Access Management
+- **UC-01**: As a user, I can register and log in securely so that my data is protected.
+- **UC-02**: As a user, my session remains active seamlessly via Refresh Tokens without requiring frequent manual logins.
 
-UC-05: As a system, archiving a course will hide its associated tasks without permanently deleting them from the database (Soft-Delete Cascade prevention).
+### 📚 Course & Task Management (Core Domain)
+- **UC-03**: As a user, I can create, edit, and archive (soft-delete) courses.
+- **UC-04**: As a user, I can create tasks under a specific course and track their status (Pending, InProgress, Completed).
+- **UC-05**: As a system, archiving a course will hide its associated tasks without permanently deleting them from the database (Soft-Delete Cascade prevention).
 
-🤖 AI Integration & FinOps (Cost Control)
-UC-06: As a user, I can submit my raw notes to an AI service to extract structured, actionable tasks.
+### 🤖 AI Integration & FinOps (Cost Control)
+- **UC-06**: As a user, I can submit my raw notes to an AI service to extract structured, actionable tasks.
+- **UC-07**: As a system, I will enforce a daily/monthly AI token quota per user to prevent resource abuse and manage external API costs.
 
-UC-07: As a system, I will enforce a daily AI Request Quota and API Rate Limiting per user to prevent resource abuse and manage external API costs.
+### 📊 Data Aggregation
+- **UC-08**: As a frontend application, I can fetch a comprehensive user dashboard (statistics, active courses, urgent tasks) via a single optimized endpoint to eliminate N+1 queries.
 
-📊 Data Aggregation
-UC-08: As a frontend application, I can fetch a comprehensive user dashboard (statistics, active courses, urgent tasks) via a single optimized endpoint to eliminate N+1 queries.
+---
 
-3. Architectural Decisions (ADRs)
-Component	Decision / Technology	Rationale
-Framework	C# / .NET 10	High performance, strong typing, and enterprise readiness.
-Architecture	Clean Architecture (4 Layers)	Ensures Separation of Concerns, testability, and framework independence.
-Database ORM	Entity Framework Core (Code-First)	Rapid development with strong LINQ projection capabilities.
-Security	JWT + Refresh Tokens	Stateless authentication with seamless UX.
-AI Integration	Gemini AI (Asynchronous API)	Human-in-the-loop approach: AI suggests tasks; user approves before DB insertion.
+## 3. Technology Stack (Detailed, by Layer)
 
-4. Database Schema Freeze (v1.0)
-The data model has been finalized with the following core entities:
+### Domain Layer — `StudyHub.Domain`
+- **C# / .NET 10**, zero external dependencies (no EF Core, no ASP.NET Core — persistence ignorance).
+- Rich domain models: private setters/`init`, private constructors, static factory methods (`Entity.Create(...)`) that enforce business rules at creation time.
 
-Users: Id, FullName, Email, AiRequestsCount, LastAiRequestDate (Quota tracking included), CreatedAt.
+### Application Layer — `StudyHub.Application`
+- **MediatR** — implements the **CQRS** pattern. Every use case (register, create course, get dashboard...) becomes one `Command` or `Query` object plus one `Handler` class. The API layer never contains business logic — it only sends a request through MediatR.
+- **FluentValidation** — validation rules live in dedicated `Validator` classes, separate from the handler logic. Wired into the MediatR pipeline via a `ValidationBehavior`, so **every** Command/Query is validated automatically before its handler ever runs — no manual `if (...) throw` checks scattered across handlers.
+- **xUnit + Moq + FluentAssertions** — unit testing stack (see Section 6).
+- Repository interfaces (`IUserRepository`, `ICourseRepository`, ...) are **defined here**, not in Infrastructure — this is the Dependency Inversion Principle: Application declares what it needs, Infrastructure provides it.
 
-Courses: Id, UserId (FK), Title, Description, IsDeleted (Soft Delete), CreatedAt.
+### Infrastructure Layer — `StudyHub.Infrastructure`
+- **EF Core 10** (Code-First) with the **Npgsql** provider for PostgreSQL.
+- Implements the repository interfaces declared in Application.
+- All entity configuration via **Fluent API only** (`IEntityTypeConfiguration<T>`), one file per entity — no Data Annotations on domain entities.
 
-Tasks: Id, CourseId (FK), Title, DueDate, Status, CreatedAt.
+### API Layer — `StudyHub.API`
+- **ASP.NET Core**, thin controllers/endpoints — each one just calls `mediator.Send(command)` and maps the result to an HTTP response.
+- **Centralized Global Exception Handling middleware** — no `try/catch` inside controllers for domain exceptions.
+- **DTOs** for every request/response — domain entities are never returned directly from an endpoint. (Mapping approach: plain manual mapping via static extension methods for now, e.g. `course.ToDto()` — simplest option, no extra library. Flag it if you'd rather learn AutoMapper/Mapster instead — easy to swap later.)
+- **OpenAPI** for API documentation (already scaffolded via `AddOpenApi()`).
+- **JWT Bearer authentication** + Refresh Token rotation (UC-01, UC-02).
 
-Notes: Id, UserId (FK), CourseId (Nullable FK), Content, CreatedAt.
+### Database
+- **PostgreSQL 15**, run locally via Docker Compose.
+- Referential integrity enforced at the DB level: Foreign Keys + Indexes on every relationship (**implemented** — see Section 7).
+- Schema versioned via **EF Core Migrations**.
 
-5. Upcoming Milestones
-[Pending] Milestone 2: Initialize .NET Solution & Clean Architecture layers.
+### DevOps / Tooling
+- **Docker Compose** for local PostgreSQL.
+- **Git** — trunk-based workflow, `feature/`, `bugfix/`, `chore/` branch prefixes, Conventional Commits (see `docs/CODING_STANDARDS.md`).
 
-[Pending] Milestone 3: Implement Domain Entities & EF Core DbContext.
+### Packages to add next (not yet installed)
+```bash
+# In StudyHub.Application
+dotnet add package MediatR
+dotnet add package FluentValidation
+dotnet add package FluentValidation.DependencyInjectionExtensions
+
+# New test projects (see Section 6)
+dotnet new xunit -n StudyHub.Domain.Tests
+dotnet new xunit -n StudyHub.Application.Tests
+dotnet add StudyHub.Application.Tests package Moq
+dotnet add StudyHub.Application.Tests package FluentAssertions
+```
+
+---
+
+## 4. Architectural Decisions (ADRs)
+
+| Component | Decision / Technology | Rationale |
+|---|---|---|
+| Framework | C# / .NET 10 | High performance, strong typing, enterprise readiness. |
+| Architecture | Clean Architecture (4 Layers) | Separation of concerns, testability, framework independence. |
+| Application Pattern | MediatR (CQRS) | Decouples request from handler; one class = one responsibility; easy to add cross-cutting behaviors (validation, logging) without touching every handler. |
+| Validation | FluentValidation | Rules separated from handler code, independently testable, integrates cleanly into the MediatR pipeline. |
+| Database ORM | EF Core (Code-First) | Rapid development, strong LINQ projection capabilities. |
+| Testing | xUnit + Moq | Industry-standard .NET testing stack; Moq fakes repository interfaces so handler tests run in milliseconds with no real database. |
+| Security | JWT + Refresh Tokens | Stateless authentication with seamless UX. |
+| AI Integration | Gemini AI (Asynchronous API) | Human-in-the-loop: AI suggests tasks, user approves before DB insertion. |
+
+---
+
+## 5. Application Layer Structure (Vertical Slices)
+
+Instead of grouping by technical type (`Services/`, `DTOs/`, `Validators/`), each **feature** gets its own folder containing everything it needs. This keeps related code together and makes each use case easy to find, read, and test in isolation.
+
+```
+StudyHub.Application/
+├── Common/
+│   ├── Interfaces/          → IUserRepository, ICourseRepository, IAiService...
+│   ├── Behaviors/           → ValidationBehavior.cs (MediatR pipeline step)
+│   └── Exceptions/          → NotFoundException, ValidationException...
+│
+├── Courses/
+│   ├── Commands/
+│   │   ├── CreateCourse/
+│   │   │   ├── CreateCourseCommand.cs
+│   │   │   ├── CreateCourseCommandHandler.cs
+│   │   │   └── CreateCourseCommandValidator.cs
+│   │   └── ArchiveCourse/
+│   │       ├── ArchiveCourseCommand.cs
+│   │       └── ArchiveCourseCommandHandler.cs
+│   └── Queries/
+│       └── GetCoursesByUser/
+│           ├── GetCoursesByUserQuery.cs
+│           ├── GetCoursesByUserQueryHandler.cs
+│           └── CourseDto.cs
+│
+├── Tasks/          → same pattern (Commands + Queries)
+├── Notes/          → same pattern
+└── Users/          → Register, Login, RefreshToken commands
+```
+
+**How a request flows end-to-end:**
+1. API endpoint receives an HTTP request, builds a `Command`/`Query` object, calls `mediator.Send(...)`.
+2. MediatR pipeline runs `ValidationBehavior` first — it finds the matching FluentValidation `Validator` for that Command/Query and runs it. If invalid → throws before the handler ever runs.
+3. If valid, MediatR routes to the matching `Handler`, which talks to the repository interfaces and returns a result.
+4. API endpoint maps the result to an HTTP response.
+
+This means a controller/endpoint method stays 3–5 lines, always.
+
+---
+
+## 6. Testing Strategy
+
+> Written for someone who hasn't worked with unit tests much yet — read this before Milestone 4.
+
+**Why test Domain and Application first, and not the whole app?**
+Domain and Application contain 100% of the *business logic* and have **zero dependency** on a real database, a running web server, or the network. That makes them fast (milliseconds) and cheap to test — no Docker, no Postgres needed to run them.
+
+Infrastructure (real EF Core queries) and API (real HTTP calls) need a different, heavier technique called **Integration Testing** (usually against a real or containerized test database). That's a later milestone — don't worry about it yet.
+
+**Two new test projects:**
+- `StudyHub.Domain.Tests` — tests entity factory methods directly.
+- `StudyHub.Application.Tests` — tests each Handler in isolation, with **Moq** faking the repository interfaces (so a handler test never touches a real database).
+
+**Naming convention** (method being tested → scenario → expected result):
+```csharp
+// StudyHub.Domain.Tests
+[Fact]
+public void Course_Create_WithEmptyTitle_ShouldThrowArgumentException()
+{
+    Action act = () => Course.Create(Guid.NewGuid(), title: "");
+    act.Should().Throw<ArgumentException>();
+}
+
+// StudyHub.Application.Tests
+[Fact]
+public async Task CreateCourseCommandHandler_WithValidCommand_ShouldReturnCourseId()
+{
+    var mockRepo = new Mock<ICourseRepository>();
+    var handler = new CreateCourseCommandHandler(mockRepo.Object);
+
+    var result = await handler.Handle(new CreateCourseCommand(userId, "OOP 101"), default);
+
+    result.Should().NotBeEmpty();
+    mockRepo.Verify(r => r.AddAsync(It.IsAny<Course>(), default), Times.Once);
+}
+```
+
+**Definition of done, starting Milestone 5**: every new Command/Query handler ships with at least one "happy path" test and one "failure path" test (e.g., invalid input, entity not found).
+
+---
+
+## 7. Database Schema (v1.1 — Implemented)
+
+Core entities: `Users`, `Courses`, `Notes`, `Tasks`, `RefreshTokens`, `AiUsageLogs`.
+
+**Status: relational integrity is fully implemented and verified** — every relationship below exists as a real Foreign Key with a supporting index in PostgreSQL:
+
+- `Courses.UserId → Users` (Restrict)
+- `Notes.UserId → Users` (Restrict), `Notes.CourseId → Courses` (SetNull)
+- `Tasks.UserId → Users` (Restrict), `Tasks.CourseId → Courses` (Restrict), `Tasks.SourceNoteId → Notes` (SetNull)
+- `RefreshTokens.UserId → Users` (Cascade)
+- `AiUsageLogs.UserId → Users` (Restrict)
+
+Soft-delete implemented via `IsDeleted` + EF Core Global Query Filters on `Notes`, `Courses`, `Tasks`.
+
+Full entity-relationship diagram: `docs/database/databaseERD` (Mermaid) and `docs/database/DataBaseERDv1.jfif`.
+
+---
+
+## 8. Roadmap
+
+| Milestone | Scope | Status |
+|---|---|---|
+| M1 | PRD & Requirements | ✅ Done |
+| M2 | .NET Solution & Clean Architecture layers | ✅ Done |
+| M3 | Domain Entities + EF Core DbContext + full relational integrity (FKs + Indexes) | ✅ Done |
+| M4 | Application layer foundation: install MediatR + FluentValidation, `ValidationBehavior`, DI wiring, test projects scaffolded | ⏳ Next |
+| M5 | Authentication (UC-01, UC-02): Register/Login/RefreshToken commands + JWT issuance + unit tests | Pending |
+| M6 | Course & Task Management (UC-03, UC-04, UC-05): CRUD commands/queries + unit tests | Pending |
+| M7 | Notes + AI Integration (UC-06, UC-07): Gemini integration + quota enforcement + unit tests | Pending |
+| M8 | Dashboard Aggregation (UC-08): single optimized query, no N+1 | Pending |
+| M9 | Hardening: Global Exception Handling middleware, integration tests (Infrastructure/API), rate limiting | Pending |
+
+---
+
+## 9. Open Questions / Assumptions (revisit as needed)
+
+- **DTO mapping**: assumed manual mapping via extension methods for now (simplest, no extra dependency). Can switch to AutoMapper/Mapster later without touching Domain/Infrastructure.
+- **API style**: Minimal APIs vs. Controllers not yet decided — doesn't block M4 (Application layer is API-style-agnostic).
+- **Repository granularity**: one repository per aggregate root (`User`, `Course`, `Note`, `TaskItem`) assumed — not yet implemented in Infrastructure.

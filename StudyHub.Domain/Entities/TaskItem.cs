@@ -17,7 +17,7 @@ public sealed class TaskItem : BaseEntity
 
     private TaskItem() { }
 
-    public static TaskItem Create(Guid userId, string title, Guid? sourceNoteId = null)
+    public static TaskItem Create(Guid userId, string title, Guid? courseId = null, Guid? sourceNoteId = null)
     {
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("Task title cannot be empty.");
@@ -26,10 +26,35 @@ public sealed class TaskItem : BaseEntity
         {
             UserId = userId,
             Title = title,
+            CourseId = courseId,
             SourceNoteId = sourceNoteId,
             Status = StudyTaskStatus.Pending,
             Priority = TaskPriority.Medium,
             IsDeleted = false
         };
+    }
+
+    public void UpdateStatus(StudyTaskStatus newStatus)
+    {
+        Status = newStatus;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void UpdateDetails(string title, string? description, TaskPriority priority, DateTime? dueDate)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Task title cannot be empty.");
+
+        Title = title;
+        Description = description;
+        Priority = priority;
+        DueDate = dueDate;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void MarkAsDeleted()
+    {
+        IsDeleted = true;
+        UpdatedAt = DateTime.UtcNow;
     }
 }

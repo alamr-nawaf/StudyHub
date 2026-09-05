@@ -1,6 +1,34 @@
-@StudyHub.API_HostAddress = http://localhost:5158
+@baseUrl = http://localhost:5158
 
-GET {{StudyHub.API_HostAddress}}/weatherforecast/
-Accept: application/json
+### 1. تسجيل صحيح - المتوقع: 201 Created
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
 
-###
+{
+  "fullName": "Ahmed Ali",
+  "email": "ahmed@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
+### 2. نفس الإيميل مرة ثانية - المتوقع: ConflictException
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Ahmed Ali",
+  "email": "ahmed@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
+### 3. بيانات غلط - المتوقع: ValidationException
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Sara",
+  "email": "not-an-email",
+  "password": "123",
+  "confirmPassword": "456"
+}

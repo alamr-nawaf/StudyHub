@@ -16,10 +16,16 @@ public sealed class User : BaseEntity
 
     public static User Create(string fullName, string email, string passwordHash, int monthlyQuota)
     {
+        if (string.IsNullOrWhiteSpace(fullName))
+            throw new ArgumentException("Full name cannot be empty.");
+
+        if (string.IsNullOrWhiteSpace(email))
+            throw new ArgumentException("Email cannot be empty.");
+
         return new User
         {
             FullName = fullName,
-            Email = email,
+            Email = email.Trim().ToLowerInvariant(), // توحيد حالة الأحرف
             PasswordHash = passwordHash,
             MonthlyTokenQuota = monthlyQuota,
             TokensUsedThisMonth = 0,
