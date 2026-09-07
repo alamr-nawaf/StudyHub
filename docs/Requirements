@@ -199,8 +199,8 @@ Full entity-relationship diagram: `docs/database/databaseERD` (Mermaid) and `doc
 | M1 | PRD & Requirements | ✅ Done |
 | M2 | .NET Solution & Clean Architecture layers | ✅ Done |
 | M3 | Domain Entities + EF Core DbContext + full relational integrity (FKs + Indexes) | ✅ Done |
-| M4 | Application layer foundation: install MediatR + FluentValidation, `ValidationBehavior`, DI wiring, test projects scaffolded | ⏳ Next |
-| M5 | Authentication (UC-01, UC-02): Register/Login/RefreshToken commands + JWT issuance + unit tests | Pending |
+| M4 | Application layer foundation: install MediatR + FluentValidation, `ValidationBehavior`, DI wiring, test projects scaffolded | ✅ Done |
+| M5 | Authentication (UC-01, UC-02): Register/Login/RefreshToken commands + JWT issuance + unit tests | ⏳ Next |
 | M6 | Course & Task Management (UC-03, UC-04, UC-05): CRUD commands/queries + unit tests | Pending |
 | M7 | Notes + AI Integration (UC-06, UC-07): Gemini integration + quota enforcement + unit tests | Pending |
 | M8 | Dashboard Aggregation (UC-08): single optimized query, no N+1 | Pending |
