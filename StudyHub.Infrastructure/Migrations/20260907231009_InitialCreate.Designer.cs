@@ -12,8 +12,8 @@ using StudyHub.Infrastructure.Data;
 namespace StudyHub.Infrastructure.Migrations
 {
     [DbContext(typeof(StudyHubDbContext))]
-    [Migration("20260903230309_AddMissingForeignKeys")]
-    partial class AddMissingForeignKeys
+    [Migration("20260907231009_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -34,25 +34,20 @@ namespace StudyHub.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime>("OperationDate")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("OperationType")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<int>("TokensConsumed")
                         .HasColumnType("integer");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "CreatedAt");
 
                     b.ToTable("AiUsageLogs");
                 });
@@ -109,7 +104,8 @@ namespace StudyHub.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<string>("Title")
-                        .HasColumnType("text");
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -125,7 +121,7 @@ namespace StudyHub.Infrastructure.Migrations
 
                     b.ToTable("Notes", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Note_TitleOrContent", "\"Title\" IS NOT NULL OR \"Content\" IS NOT NULL");
+                            t.HasCheckConstraint("CK_Note_TitleOrContent", "COALESCE(\"Title\", '') ~ '\\S' OR COALESCE(\"Content\", '') ~ '\\S'");
                         });
                 });
 
@@ -141,12 +137,16 @@ namespace StudyHub.Infrastructure.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("ReplacedByTokenId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("RevokedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("Token")
+                    b.Property<string>("TokenHash")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -155,6 +155,9 @@ namespace StudyHub.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
 
                     b.HasIndex("UserId");
 
@@ -210,7 +213,12 @@ namespace StudyHub.Infrastructure.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Tasks");
+                    b.ToTable("Tasks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Task_Priority", "\"Priority\" BETWEEN 0 AND 2");
+
+                            t.HasCheckConstraint("CK_Task_Status", "\"Status\" BETWEEN 0 AND 2");
+                        });
                 });
 
             modelBuilder.Entity("StudyHub.Domain.Entities.User", b =>
@@ -229,7 +237,8 @@ namespace StudyHub.Infrastructure.Migrations
 
                     b.Property<string>("FullName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");

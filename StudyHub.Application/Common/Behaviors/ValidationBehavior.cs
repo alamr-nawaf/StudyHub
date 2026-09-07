@@ -14,22 +14,24 @@ public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TReques
     }
 
     public async Task<TResponse> Handle(
-        TRequest request,
-        RequestHandlerDelegate<TResponse> next,
-        CancellationToken cancellationToken)
+    TRequest request,
+    RequestHandlerDelegate<TResponse> next,
+    CancellationToken cancellationToken)
     {
-        if (_validators.Any())
-        {
-            var context = new ValidationContext<TRequest>(request);
-            var failures = _validators
-                .Select(v => v.Validate(context))
-                .SelectMany(result => result.Errors)
-                .ToList();
+        if (!_validators.Any())
+            return await next(cancellationToken);
 
-            if (failures.Count != 0)
-                throw new ValidationException(failures);
-        }
+        var context = new ValidationContext<TRequest>(request);
 
-        return await next();
+        // تشغيل كل المدققات على التوازي، مع تمرير رمز الإلغاء
+        var results = await Task.WhenAll(
+            _validators.Select(v => v.ValidateAsync(context, cancellationToken)));
+
+        var failures = results.SelectMany(r => r.Errors).ToList();
+
+        if (failures.Count != 0)
+            throw new ValidationException(failures);
+
+        return await next(cancellationToken);
     }
 }

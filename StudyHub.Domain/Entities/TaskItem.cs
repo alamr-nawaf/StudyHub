@@ -3,7 +3,7 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Domain.Entities;
 
-public sealed class TaskItem : BaseEntity
+public sealed class TaskItem : AuditableEntity
 {
     public Guid UserId { get; private set; }
     public Guid? CourseId { get; private set; }

@@ -1,7 +1,8 @@
 using MediatR;
+using StudyHub.API.Common;
 using StudyHub.Application.DependencyInjection;
-using StudyHub.Infrastructure.DependencyInjection;
 using StudyHub.Application.Users.Commands.RegisterUser;
+using StudyHub.Infrastructure.DependencyInjection;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,7 +13,14 @@ builder.Services.AddInfrastructureServices(builder.Configuration);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
+
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+
 var app = builder.Build();
+
+app.UseExceptionHandler();   
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

@@ -2,7 +2,7 @@
 
 namespace StudyHub.Domain.Entities;
 
-public sealed class Note : BaseEntity
+public sealed class Note : AuditableEntity
 {
     public Guid UserId { get; private set; }
     public Guid? CourseId { get; private set; }

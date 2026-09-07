@@ -8,23 +8,27 @@ public class NoteConfiguration : IEntityTypeConfiguration<Note>
 {
     public void Configure(EntityTypeBuilder<Note> builder)
     {
-
-        // تحديد المفتاح الأساسي
         builder.HasKey(n => n.Id);
 
-        // تطبيق فلتر عام (Global Query Filter) لمنع جلب الملاحظات المحذوفة نهائياً
+        builder.Property(n => n.Title).HasMaxLength(200);
+
+        // فلتر عام يمنع جلب الملاحظات المحذوفة منطقيًا
         builder.HasQueryFilter(n => !n.IsDeleted);
 
-        builder.ToTable("Notes", t => t.HasCheckConstraint("CK_Note_TitleOrContent", "\"Title\" IS NOT NULL OR \"Content\" IS NOT NULL"));
+        // القيد القديم كان يقبل النص الفارغ بينما الدومين يرفضه.
+        // التعبير: العمود يحوي محرفًا واحدًا على الأقل ليس مسافة.
+        builder.ToTable("Notes", t => t.HasCheckConstraint(
+            "CK_Note_TitleOrContent",
+            @"COALESCE(""Title"", '') ~ '\S' OR COALESCE(""Content"", '') ~ '\S'"));
+
         builder.HasOne<User>()
-       .WithMany()
-       .HasForeignKey(n => n.UserId)
-       .OnDelete(DeleteBehavior.Restrict);
+               .WithMany()
+               .HasForeignKey(n => n.UserId)
+               .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne<Course>()
                .WithMany()
                .HasForeignKey(n => n.CourseId)
-               .OnDelete(DeleteBehavior.SetNull); // Course اختياري، فلو انحذف الكورس، الملاحظة تبقى بس بدون كورس
+               .OnDelete(DeleteBehavior.SetNull);
     }
-
 }
