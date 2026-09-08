@@ -80,6 +80,21 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: Gave each an explicit `HasMaxLength` in its configuration file.
 **Why**: EF Core constrains only what a configuration mentions. Silence is not a default of "reasonable" — it is a default of "unbounded".
 
+### A15. Entities were defined as distinct types yet required to nest inside each other (M5)
+**Problem**: Found while designing the tree. `Note` and `TaskItem` were separate tables with separate rules, while the requirement said any of them could be the parent of any other. Three storage shapes were costed and every one demanded a real sacrifice: no foreign key at all, or six parent columns across two tables, or a dissolved domain model.
+**Fix**: Merged them into one `Items` table using EF Core TPH inheritance — `Note` and `TaskItem` stay separate C# classes over a shared `Item` base, with a `Kind` discriminator and a self-referencing `ParentItemId`. Verified in psql that a task nests under a note and a note under a task.
+**Why**: The price we kept trying to negotiate was the price of a contradiction, not of a tree. A tree over a *single* type needs one nullable self-referencing column and nothing else. When every shape costs something, the requirement — not the schema — is usually what's wrong.
+
+### A16. Two of the three planned tree operations were never needed (M5)
+**Problem**: The plan specified a tree service with three operations: fetch descendants, detect cycles, compute depth. Moving a node had already been deferred — which makes a cycle impossible (a newly created child has no descendants that could enclose its own ancestor) and makes depth permanent from creation.
+**Fix**: Dropped both. Depth became a stored column guarded by `CHECK ("Depth" BETWEEN 0 AND 4)` and `CHECK (("ParentItemId" IS NULL) = ("Depth" = 0))`. Only descendant fetching survived.
+**Why**: Two of the three were defences against a mutation the design does not permit. Decide which operations exist before deciding which invariants need guarding — a rule with no operation able to break it is dead code.
+
+### A17. A recursive query was planned for a problem that has a fixed bound (M5)
+**Problem**: The plan called for `WITH RECURSIVE` to fetch a subtree, reasoning that level-by-level fetching means one query per level. True in general — but depth is capped at five, so level-by-level costs at most five queries.
+**Fix**: Kept the subtree walk in LINQ, looping level by level. Raw SQL would have cost a hand-maintained query string, a result shape EF constrains, and — critically — a query the soft-delete filter does not touch at all.
+**Why**: "One query per level" is only alarming when the number of levels is unknown. A bound turns an unbounded cost into a constant, and an optimization justified by the unbounded case stops being justified with it.
+
 ---
 
 ## B. Configuration & Wiring
@@ -108,6 +123,21 @@ A record of every technical problem hit during development, how it was fixed, an
 **Problem**: Found during code review — caught before it could bite. `AddExceptionHandler<T>()` and `AddProblemDetails()` compile and start the app cleanly, but the handler is never invoked without `app.UseExceptionHandler()`.
 **Fix**: Added `app.UseExceptionHandler()` after `builder.Build()`, then confirmed the 409 and 400 responses from the `.http` file.
 **Why**: The same shape as B1. Registering a type in the container only makes it *available*; something still has to ask for it. The container never complains about a service nobody resolves.
+
+### B6. A configuration file compiled cleanly while describing the wrong schema (M5)
+**Problem**: After the A15 restructure, `NoteConfiguration` built without a single error — every property it referenced (`Id`, `CourseId`, `Title`, `IsDeleted`) still existed through inheritance. It nonetheless declared `Note` a standalone table with its own check constraint, which would have produced a completely wrong model. Only `TaskItemConfiguration` failed, on one deleted property.
+**Fix**: Deleted both files rather than repairing the single line the compiler flagged, and wrote one `ItemConfiguration` describing the real shape.
+**Why**: The compiler checks that names resolve, not that a mapping is true. When a type's identity changes, its configuration is stale by default — and the absence of an error says nothing about it.
+
+### B7. A pasted Guid carried the response's field name with it (M5)
+**Problem**: `POST /api/notes` returned 400 with two errors: the JSON value could not be converted at `$.parentItemId`, and "The command field is required". The pasted value was `"noteId: f9c9..."` — the label from the previous response had been copied along with the Guid.
+**Fix**: Removed the label, leaving the bare Guid.
+**Why**: Two lessons. A single malformed field collapses the whole request object, so the second error is a symptom of the first, not a separate problem. And this 400 came from `[ApiController]` model binding — identifiable by the `traceId` in the body — before MediatR or `ValidationBehavior` ran at all. Same status code, entirely different source.
+
+### B8. A repository implementation was created in the Application layer (M5)
+**Problem**: `ItemRepository.cs` was placed in `StudyHub.Application/Common/Interfaces/` beside its interface. It failed to compile: `Microsoft.EntityFrameworkCore` does not exist in that project, and neither does `StudyHubDbContext`.
+**Fix**: Deleted it and recreated it under `StudyHub.Infrastructure/Data/Repositories/`, leaving only `IItemRepository` in Application.
+**Why**: The dependency rule made the mistake impossible to commit — Application has no reference to EF Core, so the compiler rejected the file the moment it landed in the wrong project. Interfaces are declared where they are needed; implementations live where their dependencies are permitted.
 
 ---
 
@@ -198,9 +228,9 @@ BC.HashPassword(password, WorkFactor);
 ### E4. Each migration generates two files (plus a snapshot)
 **Not a bug.** `X.cs` holds the actual `Up`/`Down` operations; `X.Designer.cs` is a model snapshot at that point in time, used by EF for future diffs. `StudyHubDbContextModelSnapshot.cs` is the current cumulative model. Never edit the last two by hand.
 
-### E5. Collapsing two migrations into one clean first migration (M5)
+### E5. Collapsing migrations into one clean first migration (M5)
 **Problem**: Planned in advance rather than hit at runtime. Two traps sit in the obvious approach: `migrations remove` refuses to drop a migration that is already applied, and deleting the migration files by hand leaves `StudyHubDbContextModelSnapshot.cs` behind — so the "clean" migration is scaffolded as a *diff* against the old model, full of `AlterColumn`, instead of a fresh set of `CreateTable`.
-**Fix**: `docker compose down -v` first, then `migrations remove` twice, then confirmed `Migrations/` was completely empty before `migrations add InitialCreate`. Read the generated file and counted six `CreateTable` calls and zero `AlterColumn` before applying anything.
+**Fix**: `docker compose down -v` first, then `migrations remove` once per migration, then confirmed `Migrations/` was completely empty before `migrations add InitialCreate`. Read the generated file and counted the `CreateTable` calls, with zero `AlterColumn`, before applying anything. Done twice — once for the schema fixes, once after the A15 restructure.
 **Why**: EF diffs against the snapshot, not against the database. Deleting migration files without deleting the snapshot changes what is recorded, not what EF believes already exists.
 
 ---
@@ -256,3 +286,5 @@ BC.HashPassword(password, WorkFactor);
 4. **Fix the Domain before building on top of it.** A2 would have surfaced mid-handler in a later milestone at a far worse time.
 5. **A silent limit is more dangerous than a hard one.** BCrypt truncating at 72 bytes, a `git rm` that removes nothing, a handler registered but never invoked — none of them raise anything to notice. The absence of a complaint is not a result.
 6. **A command that failed is not proof that what you were testing failed** (F3). Test a rule by trying to break it *and* by sending something that should pass — one result without the other is half an answer.
+7. **When every available design costs something real, question the requirement** (A15). The price is usually being paid for a contradiction in what was asked, not for the mechanism being built.
+8. **The dependency rule is a constraint, not a document** (B8). Application has no reference to EF Core, so a repository implementation placed there cannot compile — the architecture caught the mistake instead of merely discouraging it.

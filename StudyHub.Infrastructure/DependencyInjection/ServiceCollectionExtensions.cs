@@ -19,6 +19,8 @@ public static class ServiceCollectionExtensions
         {
             throw new InvalidOperationException("Database connection string is not configured.");
         }
+        services.AddScoped<IItemRepository, ItemRepository>();
+        services.AddScoped<ICourseRepository, CourseRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();

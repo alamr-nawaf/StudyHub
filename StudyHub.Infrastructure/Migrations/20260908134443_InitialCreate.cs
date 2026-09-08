@@ -100,72 +100,45 @@ namespace StudyHub.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Notes",
+                name: "Items",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     UserId = table.Column<Guid>(type: "uuid", nullable: false),
                     CourseId = table.Column<Guid>(type: "uuid", nullable: true),
-                    Title = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
+                    ParentItemId = table.Column<Guid>(type: "uuid", nullable: true),
+                    Depth = table.Column<int>(type: "integer", nullable: false),
+                    Title = table.Column<string>(type: "character varying(250)", maxLength: 250, nullable: false),
                     Content = table.Column<string>(type: "text", nullable: true),
                     IsDeleted = table.Column<bool>(type: "boolean", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Notes", x => x.Id);
-                    table.CheckConstraint("CK_Note_TitleOrContent", "COALESCE(\"Title\", '') ~ '\\S' OR COALESCE(\"Content\", '') ~ '\\S'");
-                    table.ForeignKey(
-                        name: "FK_Notes_Courses_CourseId",
-                        column: x => x.CourseId,
-                        principalTable: "Courses",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
-                    table.ForeignKey(
-                        name: "FK_Notes_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Tasks",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    CourseId = table.Column<Guid>(type: "uuid", nullable: true),
-                    SourceNoteId = table.Column<Guid>(type: "uuid", nullable: true),
-                    Title = table.Column<string>(type: "character varying(250)", maxLength: 250, nullable: false),
-                    Description = table.Column<string>(type: "text", nullable: true),
-                    Status = table.Column<int>(type: "integer", nullable: false),
-                    Priority = table.Column<int>(type: "integer", nullable: false),
+                    Kind = table.Column<int>(type: "integer", nullable: false),
+                    Status = table.Column<int>(type: "integer", nullable: true),
+                    Priority = table.Column<int>(type: "integer", nullable: true),
                     DueDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Tasks", x => x.Id);
-                    table.CheckConstraint("CK_Task_Priority", "\"Priority\" BETWEEN 0 AND 2");
-                    table.CheckConstraint("CK_Task_Status", "\"Status\" BETWEEN 0 AND 2");
+                    table.PrimaryKey("PK_Items", x => x.Id);
+                    table.CheckConstraint("CK_Item_Depth", "\"Depth\" BETWEEN 0 AND 4");
+                    table.CheckConstraint("CK_Item_RootDepth", "(\"ParentItemId\" IS NULL) = (\"Depth\" = 0)");
+                    table.CheckConstraint("CK_Item_TaskFields", "(\"Kind\" = 1) = (\"Status\" IS NOT NULL AND \"Priority\" IS NOT NULL)");
+                    table.CheckConstraint("CK_Item_Title", "\"Title\" ~ '\\S'");
                     table.ForeignKey(
-                        name: "FK_Tasks_Courses_CourseId",
+                        name: "FK_Items_Courses_CourseId",
                         column: x => x.CourseId,
                         principalTable: "Courses",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_Tasks_Notes_SourceNoteId",
-                        column: x => x.SourceNoteId,
-                        principalTable: "Notes",
+                        name: "FK_Items_Items_ParentItemId",
+                        column: x => x.ParentItemId,
+                        principalTable: "Items",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.SetNull);
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_Tasks_Users_UserId",
+                        name: "FK_Items_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "Id",
@@ -183,14 +156,25 @@ namespace StudyHub.Infrastructure.Migrations
                 column: "UserId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Notes_CourseId",
-                table: "Notes",
+                name: "IX_Items_CourseId",
+                table: "Items",
                 column: "CourseId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Notes_UserId",
-                table: "Notes",
-                column: "UserId");
+                name: "IX_Items_ParentItemId",
+                table: "Items",
+                column: "ParentItemId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Items_UserId_CourseId",
+                table: "Items",
+                columns: new[] { "UserId", "CourseId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Items_UserId_DueDate",
+                table: "Items",
+                columns: new[] { "UserId", "DueDate" },
+                filter: "\"Kind\" = 1");
 
             migrationBuilder.CreateIndex(
                 name: "IX_RefreshTokens_TokenHash",
@@ -201,21 +185,6 @@ namespace StudyHub.Infrastructure.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_RefreshTokens_UserId",
                 table: "RefreshTokens",
-                column: "UserId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Tasks_CourseId",
-                table: "Tasks",
-                column: "CourseId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Tasks_SourceNoteId",
-                table: "Tasks",
-                column: "SourceNoteId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Tasks_UserId",
-                table: "Tasks",
                 column: "UserId");
 
             migrationBuilder.CreateIndex(
@@ -232,13 +201,10 @@ namespace StudyHub.Infrastructure.Migrations
                 name: "AiUsageLogs");
 
             migrationBuilder.DropTable(
+                name: "Items");
+
+            migrationBuilder.DropTable(
                 name: "RefreshTokens");
-
-            migrationBuilder.DropTable(
-                name: "Tasks");
-
-            migrationBuilder.DropTable(
-                name: "Notes");
 
             migrationBuilder.DropTable(
                 name: "Courses");

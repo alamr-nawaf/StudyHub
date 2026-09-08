@@ -12,7 +12,7 @@ using StudyHub.Infrastructure.Data;
 namespace StudyHub.Infrastructure.Migrations
 {
     [DbContext(typeof(StudyHubDbContext))]
-    [Migration("20260907231009_InitialCreate")]
+    [Migration("20260908134443_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -85,7 +85,7 @@ namespace StudyHub.Infrastructure.Migrations
                     b.ToTable("Courses");
                 });
 
-            modelBuilder.Entity("StudyHub.Domain.Entities.Note", b =>
+            modelBuilder.Entity("StudyHub.Domain.Entities.Item", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -100,12 +100,22 @@ namespace StudyHub.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("Depth")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ParentItemId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Title")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -117,12 +127,24 @@ namespace StudyHub.Infrastructure.Migrations
 
                     b.HasIndex("CourseId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("ParentItemId");
 
-                    b.ToTable("Notes", null, t =>
+                    b.HasIndex("UserId", "CourseId");
+
+                    b.ToTable("Items", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Note_TitleOrContent", "COALESCE(\"Title\", '') ~ '\\S' OR COALESCE(\"Content\", '') ~ '\\S'");
+                            t.HasCheckConstraint("CK_Item_Depth", "\"Depth\" BETWEEN 0 AND 4");
+
+                            t.HasCheckConstraint("CK_Item_RootDepth", "(\"ParentItemId\" IS NULL) = (\"Depth\" = 0)");
+
+                            t.HasCheckConstraint("CK_Item_TaskFields", "(\"Kind\" = 1) = (\"Status\" IS NOT NULL AND \"Priority\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_Item_Title", "\"Title\" ~ '\\S'");
                         });
+
+                    b.HasDiscriminator<int>("Kind");
+
+                    b.UseTphMappingStrategy();
                 });
 
             modelBuilder.Entity("StudyHub.Domain.Entities.RefreshToken", b =>
@@ -162,63 +184,6 @@ namespace StudyHub.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("RefreshTokens");
-                });
-
-            modelBuilder.Entity("StudyHub.Domain.Entities.TaskItem", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("CourseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("DueDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("SourceNoteId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(250)
-                        .HasColumnType("character varying(250)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CourseId");
-
-                    b.HasIndex("SourceNoteId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("Tasks", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_Task_Priority", "\"Priority\" BETWEEN 0 AND 2");
-
-                            t.HasCheckConstraint("CK_Task_Status", "\"Status\" BETWEEN 0 AND 2");
-                        });
                 });
 
             modelBuilder.Entity("StudyHub.Domain.Entities.User", b =>
@@ -267,6 +232,54 @@ namespace StudyHub.Infrastructure.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("StudyHub.Domain.Entities.Note", b =>
+                {
+                    b.HasBaseType("StudyHub.Domain.Entities.Item");
+
+                    b.ToTable(t =>
+                        {
+                            t.HasCheckConstraint("CK_Item_Depth", "\"Depth\" BETWEEN 0 AND 4");
+
+                            t.HasCheckConstraint("CK_Item_RootDepth", "(\"ParentItemId\" IS NULL) = (\"Depth\" = 0)");
+
+                            t.HasCheckConstraint("CK_Item_TaskFields", "(\"Kind\" = 1) = (\"Status\" IS NOT NULL AND \"Priority\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_Item_Title", "\"Title\" ~ '\\S'");
+                        });
+
+                    b.HasDiscriminator().HasValue(0);
+                });
+
+            modelBuilder.Entity("StudyHub.Domain.Entities.TaskItem", b =>
+                {
+                    b.HasBaseType("StudyHub.Domain.Entities.Item");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasIndex("UserId", "DueDate")
+                        .HasFilter("\"Kind\" = 1");
+
+                    b.ToTable(t =>
+                        {
+                            t.HasCheckConstraint("CK_Item_Depth", "\"Depth\" BETWEEN 0 AND 4");
+
+                            t.HasCheckConstraint("CK_Item_RootDepth", "(\"ParentItemId\" IS NULL) = (\"Depth\" = 0)");
+
+                            t.HasCheckConstraint("CK_Item_TaskFields", "(\"Kind\" = 1) = (\"Status\" IS NOT NULL AND \"Priority\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_Item_Title", "\"Title\" ~ '\\S'");
+                        });
+
+                    b.HasDiscriminator().HasValue(1);
+                });
+
             modelBuilder.Entity("StudyHub.Domain.Entities.AiUsageLog", b =>
                 {
                     b.HasOne("StudyHub.Domain.Entities.User", null)
@@ -285,12 +298,17 @@ namespace StudyHub.Infrastructure.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("StudyHub.Domain.Entities.Note", b =>
+            modelBuilder.Entity("StudyHub.Domain.Entities.Item", b =>
                 {
                     b.HasOne("StudyHub.Domain.Entities.Course", null)
                         .WithMany()
                         .HasForeignKey("CourseId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("StudyHub.Domain.Entities.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ParentItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("StudyHub.Domain.Entities.User", null)
                         .WithMany()
@@ -305,25 +323,6 @@ namespace StudyHub.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("StudyHub.Domain.Entities.TaskItem", b =>
-                {
-                    b.HasOne("StudyHub.Domain.Entities.Course", null)
-                        .WithMany()
-                        .HasForeignKey("CourseId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("StudyHub.Domain.Entities.Note", null)
-                        .WithMany()
-                        .HasForeignKey("SourceNoteId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("StudyHub.Domain.Entities.User", null)
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 #pragma warning restore 612, 618
