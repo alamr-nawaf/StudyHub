@@ -13,7 +13,7 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
             // خمسة مستويات: صفر إلى أربعة
             t.HasCheckConstraint("CK_Item_Depth", "\"Depth\" BETWEEN 0 AND 4");
 
-            // الأب فارغ إذا وفقط إذا كان العمق صفرًا — لا حالة وسط
+            // الأب فارغ إذا وفقط إذا كان العمق صفرًا
             t.HasCheckConstraint("CK_Item_RootDepth",
                 "(\"ParentItemId\" IS NULL) = (\"Depth\" = 0)");
 
@@ -23,18 +23,24 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
 
             // العنوان يحوي محرفًا واحدًا على الأقل ليس مسافة
             t.HasCheckConstraint("CK_Item_Title", "\"Title\" ~ '\\S'");
+
+            // جديد: القيمة نفسها لا وجودها فقط
+            t.HasCheckConstraint("CK_Item_StatusValue",
+                "\"Status\" IS NULL OR \"Status\" BETWEEN 0 AND 2");
+
+            t.HasCheckConstraint("CK_Item_PriorityValue",
+                "\"Priority\" IS NULL OR \"Priority\" BETWEEN 0 AND 2");
         });
 
         builder.HasKey(i => i.Id);
 
-        // المميِّز رقم لا نص: إعادة تسمية الصنف لاحقًا لا تُفسد الصفوف المخزَّنة
+        // المميِّز رقم لا نص: إعادة تسمية الصنف لا تُفسد الصفوف المخزَّنة
         builder.HasDiscriminator<int>("Kind")
                .HasValue<Note>(0)
                .HasValue<TaskItem>(1);
 
         builder.Property(i => i.Title).IsRequired().HasMaxLength(250);
 
-        // Content يبقى نصًا بلا حد عن قصد: هو جسم الملاحظة
         builder.HasQueryFilter(i => !i.IsDeleted);
 
         builder.HasOne<User>()
@@ -53,7 +59,6 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
                .HasForeignKey(i => i.ParentItemId)
                .OnDelete(DeleteBehavior.Restrict);
 
-        // حذف الكورس بجملة واحدة، وجلب جذور المستخدم
         builder.HasIndex(i => new { i.UserId, i.CourseId });
         builder.HasIndex(i => i.ParentItemId);
     }
