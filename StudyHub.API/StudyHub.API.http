@@ -1,12 +1,13 @@
 @baseUrl = http://localhost:5158
+@userId = a72789ff-f9a4-4506-baab-f55ae2514d40
 
 ### 1. تسجيل صحيح - المتوقع: 201 Created
 POST {{baseUrl}}/api/auth/register
 Content-Type: application/json
 
 {
-  "fullName": "Ahmed Ali",
-  "email": "ahmed@test.com",
+  "fullName": "Ahmed Ali3",
+  "email": "ahmed3@test.com",
   "password": "Password123",
   "confirmPassword": "Password123"
 }
@@ -32,3 +33,110 @@ Content-Type: application/json
   "password": "123",
   "confirmPassword": "456"
 }
+### 4. إنشاء كورس - المتوقع: 201
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{
+  "title": "OOP 101",
+  "description": "Object oriented programming"
+}
+
+### 5. بلا ترويسة الهوية - المتوقع: 403
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+
+{
+  "title": "OOP 101"
+}
+
+### 6. عنوان فارغ - المتوقع: 400
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{
+  "title": ""
+}
+### 7. ملاحظة جذر - المتوقع: 201
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Lecture 1 notes", "content": "Polymorphism basics" }
+
+### 8. ملاحظة تحت كورس - المتوقع: 201
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Under course", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
+
+### 9. ملاحظة تحت ملاحظة - المتوقع: 201، والعمق 1
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Nested", "parentItemId": "f9c96308-f28b-4113-b7ae-78de07b7801c" }
+
+### 10. أب غير موجود - المتوقع: 404
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Orphan", "parentItemId": "99999999-9999-9999-9999-999999999999" }
+
+### 11. أب وكورس معًا - المتوقع: 400
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Both", "parentItemId": "f9c96308-f28b-4113-b7ae-78de07b7801c", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
+### 12. مهمة جذر - المتوقع: 201
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Review chapter 3", "priority": 2 }
+
+### 13. مهمة تحت ملاحظة - المتوقع: 201، والعمق 1
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Task under note", "parentItemId": "688a99a7-79a5-4f6e-8a30-9780256ed348" }
+
+### 14. أولوية غير صالحة - المتوقع: 400
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Bad priority", "priority": 99 }
+### 15. ملاحظة تحت الكورس - المتوقع: 201
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Level 0", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
+
+### 16. مهمة تحتها - المتوقع: 201
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Level 1", "parentItemId": "e40b0466-7424-48b8-b370-ee0a7fcf15c9" }
+
+### 17. ملاحظة تحت المهمة - المتوقع: 201
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Level 2", "parentItemId": "01a52370-5f9c-43c8-922e-bb208fed385a" }
+
+### 18. حذف الوسطى (Level 1) - المتوقع: 204
+DELETE {{baseUrl}}/api/items/01a52370-5f9c-43c8-922e-bb208fed385a
+X-User-Id: {{userId}}
+### 19. حذف الكورس - المتوقع: 204
+DELETE {{baseUrl}}/api/courses/d066a657-06b9-40ca-acc0-c6038305dab7
+X-User-Id: {{userId}}

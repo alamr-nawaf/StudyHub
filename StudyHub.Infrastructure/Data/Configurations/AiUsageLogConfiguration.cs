@@ -10,6 +10,11 @@ public class AiUsageLogConfiguration : IEntityTypeConfiguration<AiUsageLog>
     {
         builder.HasKey(a => a.Id);
 
+        builder.Property(a => a.OperationType).IsRequired().HasMaxLength(50);
+
+        // فهرس مركّب: استعلام «استخدام هذا المستخدم في هذه الفترة»
+        builder.HasIndex(a => new { a.UserId, a.CreatedAt });
+
         builder.HasOne<User>()
                .WithMany()
                .HasForeignKey(a => a.UserId)

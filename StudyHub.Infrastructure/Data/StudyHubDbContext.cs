@@ -14,6 +14,7 @@ public class StudyHubDbContext : DbContext
     // تعريف الجداول (DbSets)
     public DbSet<User> Users => Set<User>();
     public DbSet<Course> Courses => Set<Course>();
+    public DbSet<Item> Items => Set<Item>();
     public DbSet<Note> Notes => Set<Note>();
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();

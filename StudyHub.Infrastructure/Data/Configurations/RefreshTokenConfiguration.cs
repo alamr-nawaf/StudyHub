@@ -10,9 +10,15 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
     {
         builder.HasKey(r => r.Id);
 
+        // 64 محرفًا = طول هاش SHA-256 بالنظام الست عشري
+        builder.Property(r => r.TokenHash).IsRequired().HasMaxLength(64);
+
+        // فريد لأنه مفتاح البحث في كل تجديد جلسة
+        builder.HasIndex(r => r.TokenHash).IsUnique();
+
         builder.HasOne<User>()
                .WithMany()
                .HasForeignKey(r => r.UserId)
-               .OnDelete(DeleteBehavior.Cascade); // التوكن ملكه لليوزر فقط، لو انحذف اليوزر ينحذف معه
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }
