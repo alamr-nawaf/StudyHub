@@ -9,17 +9,13 @@ namespace StudyHub.Application.Tests.Users.Commands.RegisterUser;
 
 public class RegisterUserCommandHandlerTests
 {
-    private readonly Mock<IUserRepository> _userRepositoryMock;
-    private readonly Mock<IPasswordHasher> _passwordHasherMock;
-    private readonly Mock<IUnitOfWork> _unitOfWorkMock;
+    private readonly Mock<IUserRepository> _userRepositoryMock = new();
+    private readonly Mock<IPasswordHasher> _passwordHasherMock = new();
+    private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly RegisterUserCommandHandler _handler;
 
     public RegisterUserCommandHandlerTests()
     {
-        _userRepositoryMock = new Mock<IUserRepository>();
-        _passwordHasherMock = new Mock<IPasswordHasher>();
-        _unitOfWorkMock = new Mock<IUnitOfWork>();
-
         _handler = new RegisterUserCommandHandler(
             _userRepositoryMock.Object,
             _passwordHasherMock.Object,
@@ -46,9 +42,7 @@ public class RegisterUserCommandHandlerTests
         // Assert
         result.Should().NotBeEmpty();
 
-        _userRepositoryMock.Verify(
-            r => r.AddAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+        _userRepositoryMock.Verify(r => r.Add(It.IsAny<User>()), Times.Once);
 
         _unitOfWorkMock.Verify(
             u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
@@ -69,16 +63,31 @@ public class RegisterUserCommandHandlerTests
         var act = async () => await _handler.Handle(command, CancellationToken.None);
 
         // Assert
-        await act.Should().ThrowAsync<ConflictException>()
-            .WithMessage($"An account with email '{command.Email}' already exists.");
+        await act.Should().ThrowAsync<ConflictException>();
 
-        _userRepositoryMock.Verify(
-            r => r.AddAsync(It.IsAny<User>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _userRepositoryMock.Verify(r => r.Add(It.IsAny<User>()), Times.Never);
 
         _unitOfWorkMock.Verify(
             u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_WithExistingEmail_ShouldNotLeakTheEmailInTheMessage()
+    {
+        // Arrange
+        var command = new RegisterUserCommand("Ahmed Ali", "ahmed@test.com", "Password123", "Password123");
+
+        _userRepositoryMock
+            .Setup(r => r.EmailExistsAsync(command.Email, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var act = async () => await _handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        var thrown = await act.Should().ThrowAsync<ConflictException>();
+        thrown.Which.Message.Should().NotContain(command.Email);
     }
 
     [Fact]
@@ -102,7 +111,7 @@ public class RegisterUserCommandHandlerTests
         _passwordHasherMock.Verify(h => h.Hash(command.Password), Times.Once);
 
         _userRepositoryMock.Verify(
-            r => r.AddAsync(It.Is<User>(u => u.PasswordHash == "super-secret-hash"), It.IsAny<CancellationToken>()),
+            r => r.Add(It.Is<User>(u => u.PasswordHash == "super-secret-hash")),
             Times.Once);
     }
 }

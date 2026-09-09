@@ -9,8 +9,11 @@ public class StudyHubDbContextFactory : IDesignTimeDbContextFactory<StudyHubDbCo
     {
         var optionsBuilder = new DbContextOptionsBuilder<StudyHubDbContext>();
 
+        // لا قيمة احتياطية: أوامر dotnet ef لا تقرأ user-secrets،
+        // فالمتغيّر هو المصدر الوحيد ويجب أن يفشل بوضوح إن غاب.
         var connectionString = Environment.GetEnvironmentVariable("STUDYHUB_DB_CONNECTION")
-            ?? "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword";
+            ?? throw new InvalidOperationException(
+                "STUDYHUB_DB_CONNECTION is not set. Design-time commands do not read user-secrets.");
 
         optionsBuilder.UseNpgsql(connectionString);
 

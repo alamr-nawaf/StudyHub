@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StudyHub.Infrastructure.Data;
@@ -11,9 +12,11 @@ using StudyHub.Infrastructure.Data;
 namespace StudyHub.Infrastructure.Migrations
 {
     [DbContext(typeof(StudyHubDbContext))]
-    partial class StudyHubDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260908212104_AddValueConstraints")]
+    partial class AddValueConstraints
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

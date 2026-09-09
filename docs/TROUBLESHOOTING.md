@@ -197,11 +197,13 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: Found during code review. `Verify` handed the stored hash straight to the library; a corrupt or foreign-format hash raises `SaltParseException`, which would have failed the whole login request rather than rejecting the credentials.
 **Fix**: Wrapped the call in `try/catch (SaltParseException)` returning `false`.
 **Why**: A verification function has exactly two correct answers. Any third outcome — an exception included — converts a rejected login into a server error, and hands the caller a distinction it should never see.
+**Correction**: this entry was written before the change was applied. The file was not actually edited until later in M5, and nothing detected the gap. See G4.
 
 ### D5. BCrypt silently ignores every byte past the first 72 (M5)
 **Problem**: Found during code review. The algorithm truncates its input at 72 bytes with no error, so two long passwords sharing their first 72 bytes authenticate each other. `MaximumLength(72)` in the validator would not have closed the gap either — FluentValidation counts characters, and one Arabic character is two bytes.
 **Fix**: Switched to `EnhancedHashPassword` / `EnhancedVerify`, which pre-hash the input so the limit no longer applies. Done before any real accounts existed, since the two formats are not interchangeable once hashes are stored.
 **Why**: A silent limit is more dangerous than a hard one — nothing fails, so nothing gets investigated. And a rule expressed in characters says nothing about a limit measured in bytes.
+**Correction**: as with D4, this entry preceded the change it describes. The switch to `EnhancedHashPassword` was applied later in M5, still before any real account existed — the claim in **Fix** holds, but only by luck of timing. See G4.
 
 ### D6. A value object must be compared whole inside an EF Core query (M5)
 **Problem**: Found during code review, while adding the `Email` value object. With a value converter in place, EF Core sees one text column and knows nothing about the object's inner property — a query filtering on `u.Email.Value` compiles cleanly and fails at runtime.
@@ -266,6 +268,11 @@ BC.HashPassword(password, WorkFactor);
 
 ### G3. `using Xunit;` shows as unused (greyed out)
 **Not a bug.** Modern xUnit templates add `<Using Include="Xunit" />` to the `.csproj`, making it a global using. The explicit one is redundant and can be deleted.
+
+### G4. A change was logged as done before it had been applied (M5)
+**Problem**: `BCryptPasswordHasher.cs` was never edited, yet entries D4 and D5 already described the fix as complete. Nothing caught it: the build passed, all 43 tests passed, and the `.http` file still returned 201 — because no code path calls `Verify` yet and a stored hash looks identical either way.
+**Fix**: Applied the change for real, wiped the database (old-format hashes are not verifiable by `EnhancedVerify`), corrected D4 and D5, and moved the two behavioural proofs into the M6 checklist.
+**Why**: Every verification in use here is behavioural — a status code, a row, a green test. A change with no externally observable behaviour passes all of them unchanged. Such a change must be verified by opening the file and reading it; there is nothing else.
 
 ---
 

@@ -18,6 +18,5 @@ public class UserRepository : IUserRepository
         return _context.Users.AnyAsync(u => u.Email == normalized, cancellationToken);
     }
 
-    public async Task AddAsync(User user, CancellationToken cancellationToken)
-        => await _context.Users.AddAsync(user, cancellationToken);
+    public void Add(User user) => _context.Users.Add(user);
 }

@@ -7,7 +7,7 @@ namespace StudyHub.Application.Users.Commands.RegisterUser;
 
 public class RegisterUserCommandHandler : IRequestHandler<RegisterUserCommand, Guid>
 {
-    private const int DefaultMonthlyTokenQuota = 100_000; // قابل للتغيير بسهولة لاحقًا
+    private const int DefaultMonthlyTokenQuota = 100_000; // يُنقل إلى الإعدادات في M7
 
     private readonly IUserRepository _userRepository;
     private readonly IPasswordHasher _passwordHasher;
@@ -25,14 +25,15 @@ public class RegisterUserCommandHandler : IRequestHandler<RegisterUserCommand, G
 
     public async Task<Guid> Handle(RegisterUserCommand request, CancellationToken cancellationToken)
     {
+        // الفحص المسبق للرسالة اللطيفة؛ القيد الفريد في القاعدة هو الحماية الحقيقية
         if (await _userRepository.EmailExistsAsync(request.Email, cancellationToken))
-            throw new ConflictException($"An account with email '{request.Email}' already exists.");
+            throw new ConflictException("An account with this email already exists.");
 
         var passwordHash = _passwordHasher.Hash(request.Password);
 
         var user = User.Create(request.FullName, request.Email, passwordHash, DefaultMonthlyTokenQuota);
 
-        await _userRepository.AddAsync(user, cancellationToken);
+        _userRepository.Add(user);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return user.Id;

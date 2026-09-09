@@ -19,7 +19,7 @@ public sealed class Course : AuditableEntity
         return new Course
         {
             UserId = userId,
-            Title = title,
+            Title = title.Trim(),       
             Description = description,
             IsDeleted = false
         };
@@ -29,7 +29,8 @@ public sealed class Course : AuditableEntity
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("Course title cannot be empty.");
 
-        Title = title;
+
+        Title = title.Trim();
         Description = description;
         UpdatedAt = DateTime.UtcNow;
     }
