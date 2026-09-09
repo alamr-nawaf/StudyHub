@@ -25,15 +25,15 @@ public class ItemRepository : IItemRepository
         var subtree = new List<Item> { root };
         var currentLevel = new List<Guid> { root.Id };
 
-        // خمس دورات كحد أقصى، لأن العمق مقيَّد بـ Item.MaxDepth
-        while (currentLevel.Count > 0)
+        // حدّ صارم على الدورات: العمق مقيَّد بـ Item.MaxDepth، والسقف هنا
+        // يمنع حلقة لا نهائية لو صنع UPDATE مباشر في القاعدة دائرة
+        for (var level = 0; level <= Item.MaxDepth && currentLevel.Count > 0; level++)
         {
             var children = await _context.Items
                 .Where(i => i.ParentItemId != null && currentLevel.Contains(i.ParentItemId.Value))
                 .ToListAsync(cancellationToken);
 
-            if (children.Count == 0)
-                break;
+            
 
             subtree.AddRange(children);
             currentLevel = children.Select(c => c.Id).ToList();

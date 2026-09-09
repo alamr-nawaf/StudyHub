@@ -1,53 +1,141 @@
 # StudyHub
 
-StudyHub API - Engineering Brief & PRD (Milestone 1)
-1. Project Vision
-StudyHub is a robust, scalable backend system designed to manage educational resources, tasks, and notes. The project integrates traditional RESTful operations with external AI services, adhering strictly to Clean Architecture principles and industry-standard Software Development Life Cycle (SDLC) practices.
+A backend API for managing courses, study notes, and tasks, with AI-assisted extraction of actionable tasks from raw notes.
 
-2. Core Use Cases (User Stories)
-👤 Identity & Access Management
-UC-01: As a user, I can register and log in securely so that my data is protected.
+Built as a **personal learning project** — the goal is to practise professional .NET backend engineering (Clean Architecture, CQRS, rich domain models, real schema constraints) rather than to ship the fastest possible MVP.
 
-UC-02: As a user, my session remains active seamlessly via Refresh Tokens without requiring frequent manual logins.
+**C# / .NET 10 · PostgreSQL 15 · EF Core 10 · MediatR · FluentValidation · xUnit**
 
-📚 Course & Task Management (Core Domain)
-UC-03: As a user, I can create, edit, and archive (soft-delete) courses.
+---
 
-UC-04: As a user, I can create tasks under a specific course and track their status (Pending, InProgress, Completed).
+## ⚠ Not deployable yet
 
-UC-05: As a system, archiving a course will hide its associated tasks without permanently deleting them from the database (Soft-Delete Cascade prevention).
+Authentication is not implemented. Identity currently comes from an `X-User-Id` request header, which is a **complete authentication bypass** — anyone can name any user and become them. It exists so the content features could be built and verified before the auth milestone.
 
-🤖 AI Integration & FinOps (Cost Control)
-UC-06: As a user, I can submit my raw notes to an AI service to extract structured, actionable tasks.
+Do not deploy this or expose it on any network until M6 is complete.
 
-UC-07: As a system, I will enforce a daily AI Request Quota and API Rate Limiting per user to prevent resource abuse and manage external API costs.
+---
 
-📊 Data Aggregation
-UC-08: As a frontend application, I can fetch a comprehensive user dashboard (statistics, active courses, urgent tasks) via a single optimized endpoint to eliminate N+1 queries.
+## Quick start
 
-3. Architectural Decisions (ADRs)
-Component	Decision / Technology	Rationale
-Framework	C# / .NET 10	High performance, strong typing, and enterprise readiness.
-Architecture	Clean Architecture (4 Layers)	Ensures Separation of Concerns, testability, and framework independence.
-Database ORM	Entity Framework Core (Code-First)	Rapid development with strong LINQ projection capabilities.
-Security	JWT + Refresh Tokens	Stateless authentication with seamless UX.
-AI Integration	Gemini AI (Asynchronous API)	Human-in-the-loop approach: AI suggests tasks; user approves before DB insertion.
+```bash
+# 1. Start PostgreSQL
+docker compose up -d
 
-4. Database Schema Freeze (v1.0)
-The data model has been finalized with the following core entities:
+# 2. Store the connection string for the running app (one time only)
+cd StudyHub.API
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" \
+  "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword"
+cd ..
 
-Users: Id, FullName, Email, AiRequestsCount, LastAiRequestDate (Quota tracking included), CreatedAt.
+# 3. Apply the schema — see the note below about the environment variable
+dotnet ef database update --project StudyHub.Infrastructure --startup-project StudyHub.API
 
-Courses: Id, UserId (FK), Title, Description, IsDeleted (Soft Delete), CreatedAt.
+# 4. Run
+dotnet run --project StudyHub.API
 
-Tasks: Id, CourseId (FK), Title, DueDate, Status, CreatedAt.
+# 5. Run the tests (no Docker needed)
+dotnet test
+```
 
-Notes: Id, UserId (FK), CourseId (Nullable FK), Content, CreatedAt.
+### Step 3 needs an environment variable
 
-5. Upcoming Milestones
-5. Progress Status
-[Done] Milestone 2: .NET Solution & Clean Architecture layers initialized.
-[Done] Milestone 3: Domain Entities, EF Core DbContext, and full relational schema (Foreign Keys + Indexes) implemented.
-[Pending] Milestone 4: Authentication (JWT + Refresh Tokens).
-[Pending] Milestone 5: Controllers & DTOs for Courses, Tasks, Notes.
-[Pending] Milestone 6: AI Integration (Gemini) + Quota enforcement.
+`dotnet ef` commands do **not** read user secrets. They go through `IDesignTimeDbContextFactory`, which reads `STUDYHUB_DB_CONNECTION`. Set it in the same terminal session:
+
+```powershell
+# PowerShell
+$env:STUDYHUB_DB_CONNECTION = "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword"
+```
+
+```cmd
+:: cmd.exe — quotes wrap the whole assignment, not just the value
+set "STUDYHUB_DB_CONNECTION=Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword"
+```
+
+These are two separate configuration paths. Migration commands succeeding proves nothing about whether the running app is configured, and vice versa.
+
+---
+
+## Trying the API
+
+Open `StudyHub.API/StudyHub.API.http` in Visual Studio or VS Code with the REST Client extension.
+
+1. Send request 1 to register a user.
+2. Copy the returned `userId` into the `@userId` variable at the top of the file.
+3. The remaining requests will work.
+
+### Inspecting the database
+
+```bash
+docker exec -it studyhub_postgres psql -U postgres -d StudyHubDb
+```
+
+This is the only view that does **not** pass through EF Core's soft-delete filter, so it is the way to confirm that an archived row still exists. Paste one statement per line.
+
+---
+
+## Project layout
+
+```
+StudyHub.Domain             Business entities & rules. Zero external dependencies.
+StudyHub.Application        Use cases (Command + Handler). Depends only on Domain.
+StudyHub.Infrastructure     EF Core, PostgreSQL, security implementations.
+StudyHub.API                ASP.NET Core host. Thin — no business logic.
+StudyHub.Domain.Tests       Entity rules.
+StudyHub.Application.Tests  Handlers, dependencies mocked.
+```
+
+Dependencies point inward only: `API → Infrastructure → Application → Domain`.
+
+---
+
+## Endpoints implemented
+
+| Method | Route | Result |
+|---|---|---|
+| POST | `/api/auth/register` | 201 + userId |
+| POST | `/api/courses` | 201 + courseId |
+| DELETE | `/api/courses/{id}` | 204 — archives the course and its whole tree |
+| POST | `/api/notes` | 201 + noteId |
+| POST | `/api/tasks` | 201 + taskId |
+| DELETE | `/api/items/{id}` | 204 — archives the item and its whole subtree |
+
+Login, refresh, read queries, and update endpoints are not built yet.
+
+---
+
+## Common problems
+
+| Symptom | Cause |
+|---|---|
+| `SocketException (10061)` on port 5432 | The Postgres container isn't running — `docker compose up -d` |
+| `Database connection string is not configured` at startup | User secrets not set (step 2) |
+| `STUDYHUB_DB_CONNECTION is not set` from `dotnet ef` | Environment variable missing in this terminal (step 3) |
+| MediatR license warning at startup | Expected and harmless — the project is inside the free tier |
+
+Every problem hit during development, with its root cause, is recorded in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+
+---
+
+## Documentation
+
+| Document | Answers |
+|---|---|
+| [`docs/Requirements.md`](docs/Requirements.md) | **What** the system does and **why** — use cases, business rules, the tree design, schema, architectural decisions, roadmap |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | **How** it is built — technology choices, request workflows, the `Items` table explained |
+| [`docs/CODING_STANDARDS.md`](docs/CODING_STANDARDS.md) | Rules for writing code in this repository |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Every problem hit, its fix, and its root cause |
+| [`docs/TROUBLESHOOTING_GUIDE.md`](docs/TROUBLESHOOTING_GUIDE.md) | How to add an entry to the log above |
+| [`docs/database/databaseERD`](docs/database/databaseERD) | Entity-relationship diagram (Mermaid) |
+
+**This file describes how to run the project. It deliberately does not repeat the requirements** — duplicated documents always drift, and this one used to be a verbatim copy of the PRD.
+
+---
+
+## Progress
+
+M1–M5 complete: architecture, domain, schema, error handling, and the content tree with cascade archiving.
+**M6 (authentication) is next.**
+
+Full roadmap: [`docs/Requirements.md`](docs/Requirements.md) §11.

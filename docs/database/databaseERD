@@ -1,75 +1,70 @@
+%% StudyHub — Entity Relationship Diagram v2.0
+%% Five tables. Notes and Tasks were merged into ITEMS in M5 (see Requirements.md ADR-08).
+%% ITEMS is a Table-Per-Hierarchy table: Kind = 0 is a Note, Kind = 1 is a Task.
+
 erDiagram
-    USERS ||--o{ COURSES : "creates"
-    USERS ||--o{ NOTES : "writes"
-    USERS ||--o{ TASKS : "owns"
+    USERS ||--o{ COURSES : "owns"
+    USERS ||--o{ ITEMS : "owns"
+    USERS ||--o{ REFRESH_TOKENS : "holds sessions"
     USERS ||--o{ AI_USAGE_LOGS : "generates"
-    USERS ||--o{ REFRESH_TOKENS : "secures session"
-    COURSES ||--o{ TASKS : "groups"
-    COURSES ||--o{ NOTES : "contextualizes"
-    NOTES ||--o{ TASKS : "source of"
+    COURSES ||--o{ ITEMS : "groups"
+    ITEMS ||--o{ ITEMS : "contains"
 
     USERS {
-        uniqueidentifier Id PK
-        string FullName
-        string Email
-        string PasswordHash
+        uuid Id PK
+        string FullName "150"
+        string Email UK "150, normalized lowercase"
+        string PasswordHash "BCrypt enhanced"
         int MonthlyTokenQuota
         int TokensUsedThisMonth
         datetime LastTokenResetDate
-        boolean IsActive
+        bool IsActive
         datetime CreatedAt
-        datetime UpdatedAt
-    }
-
-    REFRESH_TOKENS {
-        uniqueidentifier Id PK
-        uniqueidentifier UserId FK
-        string Token
-        datetime ExpiresAt
-        datetime RevokedAt "Nullable"
-        datetime CreatedAt
+        datetime UpdatedAt "nullable"
     }
 
     COURSES {
-        uniqueidentifier Id PK
-        uniqueidentifier UserId FK
-        string Title
-        string Description "Nullable"
-        boolean IsDeleted
+        uuid Id PK
+        uuid UserId FK "restrict"
+        string Title "200, CK non-blank"
+        string Description "nullable"
+        bool IsDeleted "soft delete"
         datetime CreatedAt
-        datetime UpdatedAt
+        datetime UpdatedAt "nullable"
     }
 
-    NOTES {
-        uniqueidentifier Id PK
-        uniqueidentifier UserId FK
-        uniqueidentifier CourseId FK "Nullable"
-        string Title "Nullable"
-        string Content "Nullable"
-        boolean IsDeleted
+    ITEMS {
+        uuid Id PK
+        uuid UserId FK "restrict"
+        uuid CourseId FK "nullable, inherited from parent"
+        uuid ParentItemId FK "nullable, self-reference"
+        int Depth "0-4, CK"
+        string Title "250, CK non-blank"
+        string Content "nullable, unbounded"
+        bool IsDeleted "soft delete, cascades down"
+        int Kind "0 Note, 1 Task"
+        int Status "nullable, tasks only"
+        int Priority "nullable, tasks only"
+        datetime DueDate "nullable, tasks only"
         datetime CreatedAt
-        datetime UpdatedAt
+        datetime UpdatedAt "nullable"
     }
 
-    TASKS {
-        uniqueidentifier Id PK
-        uniqueidentifier UserId FK
-        uniqueidentifier CourseId FK "Nullable"
-        uniqueidentifier SourceNoteId FK "Nullable"
-        string Title
-        string Description "Nullable"
-        int Status
-        int Priority
-        datetime DueDate "Nullable"
-        boolean IsDeleted
+    REFRESH_TOKENS {
+        uuid Id PK
+        uuid UserId FK "cascade"
+        string TokenHash UK "64, SHA-256 hex"
+        datetime ExpiresAt
+        datetime RevokedAt "nullable"
+        uuid ReplacedByTokenId "nullable, rotation chain"
         datetime CreatedAt
-        datetime UpdatedAt
+        datetime UpdatedAt "nullable"
     }
 
     AI_USAGE_LOGS {
-        uniqueidentifier Id PK
-        uniqueidentifier UserId FK
-        string OperationType
+        uuid Id PK
+        uuid UserId FK "restrict"
+        string OperationType "50"
         int TokensConsumed
-        datetime OperationDate
+        datetime CreatedAt "no UpdatedAt, write-once"
     }
