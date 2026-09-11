@@ -1,6 +1,6 @@
 # StudyHub
 
-A backend API for managing courses, study notes, and tasks, with AI-assisted extraction of actionable tasks from raw notes.
+A backend API for managing courses, study notes, and tasks, with AI-suggested tasks extracted from raw notes and approved by the user (planned).
 
 Built as a **personal learning project** — the goal is to practise professional .NET backend engineering (Clean Architecture, CQRS, rich domain models, real schema constraints) rather than to ship the fastest possible MVP.
 
@@ -71,7 +71,7 @@ Open `StudyHub.API/StudyHub.API.http` in Visual Studio or VS Code with the REST 
 docker exec -it studyhub_postgres psql -U postgres -d StudyHubDb
 ```
 
-This is the only view that does **not** pass through EF Core's soft-delete filter, so it is the way to confirm that an archived row still exists. Paste one statement per line.
+This is the only view that does **not** pass through EF Core's soft-delete filter, so it is the way to confirm that a soft-deleted row still exists. Paste one statement per line.
 
 ---
 
@@ -96,12 +96,12 @@ Dependencies point inward only: `API → Infrastructure → Application → Doma
 |---|---|---|
 | POST | `/api/auth/register` | 201 + userId |
 | POST | `/api/courses` | 201 + courseId |
-| DELETE | `/api/courses/{id}` | 204 — archives the course and its whole tree |
+| DELETE | `/api/courses/{id}` | 204 — soft-deletes the course and its whole tree; not reversible through the API |
 | POST | `/api/notes` | 201 + noteId |
 | POST | `/api/tasks` | 201 + taskId |
-| DELETE | `/api/items/{id}` | 204 — archives the item and its whole subtree |
+| DELETE | `/api/items/{id}` | 204 — soft-deletes the item and its whole subtree; not reversible through the API |
 
-Login, refresh, read queries, and update endpoints are not built yet.
+Login and refresh arrive in M6; read queries and update endpoints in M7.
 
 ---
 
@@ -135,7 +135,7 @@ Every problem hit during development, with its root cause, is recorded in [`docs
 
 ## Progress
 
-M1–M5 complete: architecture, domain, schema, error handling, and the content tree with cascade archiving.
-**M6 (authentication) is next.**
+M1–M5 complete: architecture, domain, schema, error handling, and the content tree with cascade soft-delete.
+**M5.1 (cleanup) is in progress; M6 (authentication) is next.**
 
 Full roadmap: [`docs/Requirements.md`](docs/Requirements.md) §11.

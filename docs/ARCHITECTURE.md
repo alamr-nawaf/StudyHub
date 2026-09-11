@@ -6,13 +6,13 @@
 > For **code style rules**, see [`CODING_STANDARDS.md`](CODING_STANDARDS.md).
 > For **problems hit and how they were fixed**, see [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 >
-> **v2.0** — rewritten after the M5 restructure. The `Notes` and `Tasks` tables described in v1 no longer exist.
+> **v3.0** — aligned with `Requirements.md` v3.0. It follows the same reading convention: a statement tagged with a milestone — *(M5.1)*, *(M6)* — describes something not built yet; an untagged statement describes code that exists today. (v2.0 was the rewrite after the M5 restructure, when the `Notes` and `Tasks` tables of v1 disappeared.)
 
 ---
 
 ## 1. What Is This Project
 
-StudyHub is a backend API for managing courses, notes, and tasks, with AI-assisted extraction of tasks from raw notes.
+StudyHub is a backend API for managing courses, notes, and tasks, with AI-suggested tasks extracted from raw notes — suggestions the user approves before anything is written *(M8)*.
 
 It is a **personal learning project**. The goal is to practise professional .NET backend patterns correctly — Clean Architecture, CQRS, rich domain models, real schema constraints, and a disciplined verification habit — not to ship the fastest possible MVP.
 
@@ -30,6 +30,7 @@ StudyHub/
 ├── StudyHub.API                → ASP.NET Core host. Thin — no business logic.
 ├── StudyHub.Domain.Tests       → Unit tests for entity rules.
 ├── StudyHub.Application.Tests  → Unit tests for handlers, dependencies mocked.
+├── StudyHub.Infrastructure.Tests → Unit tests for infrastructure code that needs no database. (M5.1)
 └── docs/                       → Requirements, architecture, standards, troubleshooting, ERD.
 ```
 
@@ -69,7 +70,7 @@ BaseEntity
 
 The base class is split because a usage log is not an editable entity. Giving it `UpdatedAt` would create a column guaranteed to stay null forever. **Inheritance follows lifecycle, not convenience.**
 
-**Value object**: `Email` owns normalization and format checking. It exists because that logic was previously written twice — in `User.Create` and in `UserRepository` — and a divergence between the two would let a duplicate account walk straight past a unique index.
+**Value object**: `Email` owns normalization and format checking. It exists because that logic was previously written twice — in `User.Create` and in `UserRepository` — and a divergence between the two would let a duplicate account walk straight past a unique index. From M5.1 the EF Core converter rebuilds it through `Email.FromPersisted`, which does not validate — a converter is a mapping, not a gate, and one corrupt row must not turn every read of that user into a 500 (Requirements §3.3).
 
 **Clock handling**: methods whose behaviour depends on time (`User.ResetQuotaIfNeeded`, `RefreshToken.IsActive`, `RefreshToken.Revoke`) take `utcNow` as a parameter, so they are testable with no clock abstraction. Everything else reads `DateTime.UtcNow` directly. This is a deliberate limit: a full `TimeProvider` injection across every entity would touch every call site and every test to buy testability in places nobody tests.
 
@@ -91,7 +92,7 @@ Free, strong relational guarantees, and identical behaviour in local Docker and 
 
 **Table-Per-Hierarchy (TPH)**: `Note` and `TaskItem` are distinct C# classes stored in one `Items` table with an integer `Kind` discriminator. See §6 for the full explanation.
 
-**A trap worth knowing**: EF's global query filters (`!IsDeleted`) apply to LINQ only. Any raw SQL bypasses them completely.
+**A trap worth knowing**: EF's global query filters (`!IsDeleted`, becoming `DeletedAt == null` in M7) apply to LINQ only. Any raw SQL bypasses them completely.
 
 ### Application pattern — MediatR 14 (CQRS)
 
@@ -132,9 +133,19 @@ Refresh tokens are stored hashed, but with a **deterministic** hash. Every refre
 
 SHA-256 is safe here precisely because a refresh token is high-entropy random data, unlike a human-chosen password.
 
+### Access tokens — `Microsoft.IdentityModel.JsonWebTokens` *(M6)*
+
+Tokens are written with `JsonWebTokenHandler` — the handler `JwtBearer` has used to read them since ASP.NET Core 8. `System.IdentityModel.Tokens.Jwt` is the previous generation of the same library, and writing with one handler while reading with the other is a known source of claim-name surprises (Requirements ADR-29, §9.1).
+
+### Concurrency — PostgreSQL `xmin` *(M6)*
+
+Refresh token rotation reads a row and writes it back, so two parallel requests could both succeed and fork one session into two. PostgreSQL changes the hidden `xmin` column on every update; EF Core maps it as a shadow concurrency token, so the second save fails instead. No column is added and no Domain type gains a field (Requirements ADR-27, §14.4).
+
 ### Testing — xUnit + Moq + FluentAssertions
 
 Moq fakes the interfaces declared in Application, so a test like "creating an item under another user's parent throws `ForbiddenException`" runs in milliseconds against no database. FluentAssertions makes failures readable at 2am.
+
+From M5.1, `StudyHub.Infrastructure.Tests` covers infrastructure code that needs no database — password hashing first, token generation in M6. Application tests never reference Infrastructure; the tests follow the same dependency rule as the code.
 
 **Not automated yet**: EF Core queries and HTTP round-trips need integration testing against a containerized database — scheduled for M10.
 
@@ -176,7 +187,7 @@ Read the middle branch carefully: a **task nested under a note**, and a **note n
 - `CourseId` — which course this belongs to (grouping)
 - `ParentItemId` — which item this sits under (nesting)
 
-A root item may have a course or not. A nested item **inherits** its parent's `CourseId` and cannot be given a different one.
+A root item may have a course or not. A nested item **inherits** its parent's `CourseId`; a request that sends a course together with a parent is rejected — any course, the parent's own included (Requirements rule 3.2.5).
 
 ### 4.2 Registration — implemented end to end
 
@@ -217,7 +228,7 @@ sequenceDiagram
 
 **Two conflict checks, on purpose.** The pre-check in the handler produces a friendly message. The unique index plus the `23505` translation in `UnitOfWork` is the actual protection — two simultaneous requests with the same email both pass the pre-check, and only the database can arbitrate.
 
-**Why the `23505` translation lives in Infrastructure**: `PostgresException` is an Npgsql type. Catching it in a handler would make the Application layer aware of the database engine and break the dependency rule.
+**Why the `23505` translation lives in Infrastructure**: `PostgresException` is an Npgsql type. Catching it in a handler would make the Application layer aware of the database engine and break the dependency rule. From M6 the same place translates `DbUpdateConcurrencyException` into `ConflictException` as well (ADR-27).
 
 ### 4.3 Creating a nested item — the richest flow
 
@@ -244,6 +255,8 @@ sequenceDiagram
         H-->>Client: NotFoundException → 404
     else parent belongs to someone else
         H-->>Client: ForbiddenException → 403
+    else parent at maximum depth (M5.1)
+        H-->>Client: ConflictException → 409
     else parent is valid
         H->>Ent: Note.Create(userId, title, content, parent, courseId)
         Note over Ent: re-checks ownership<br/>checks parent not deleted<br/>checks Depth < MaxDepth<br/>inherits parent.CourseId<br/>sets Depth = parent.Depth + 1
@@ -260,11 +273,13 @@ sequenceDiagram
 | Layer | Checks | Why it exists |
 |---|---|---|
 | Validator | shape of the request | fails fast, before any I/O |
-| Handler | parent exists, parent is owned | produces a precise 404 vs 403 |
+| Handler | parent exists, is owned, has room *(M5.1)* | produces a precise 404, 403, or 409 |
 | Entity | ownership, depth, deleted parent | **trusts no caller** — a handler that forgets cannot corrupt the tree |
 | Database | depth range, root/depth agreement, title, enum ranges | protects against anything writing outside the application |
 
 Duplication here is not waste. Each layer answers a different question: the handler answers *"what should the client be told?"*, the entity answers *"is this object valid?"*, the database answers *"is this row valid regardless of who wrote it?"*
+
+**A rule is written once and asked twice** *(M5.1, ADR-30)*. The handler asks `parent.IsAtMaxDepth`; `Item.Initialize` asks the same member. Restating the condition in the handler would put the rule in two places, free to drift. Until M5.1 the handler does not ask at all, so the request reaches the entity's guard and the client gets a 500 — the A5 failure shape, still open for this one rule.
 
 ### 4.4 Cascade delete — two shapes
 
@@ -288,6 +303,8 @@ graph LR
     end
 ```
 
+From M7, one delete operation stamps a single `DeletedBatchId` on every row it touches, so a later restore can tell a cascade from a deliberate delete (ADR-25).
+
 **The course path needs no traversal at all.** Because every nested item inherits its root's `CourseId`, a flat `WHERE CourseId = @id` already returns the entire tree at every depth. That is the payoff of the deliberate duplication in ADR-09.
 
 **Why no explicit transaction**: a single `SaveChangesAsync` call *is* one transaction in EF Core. Wrapping it in `BeginTransaction` would add nothing.
@@ -302,35 +319,48 @@ graph TD
     G --> V["ValidationException → 400<br/>+ errors grouped by field"]
     G --> F["ForbiddenException → 403"]
     G --> N["NotFoundException → 404"]
-    G --> C["ConflictException → 409"]
+    G --> C["ConflictException → 409<br/>duplicate, full parent, lost race"]
+    G --> I["InvalidCredentialsException → 401<br/>login and refresh only (M6)"]
+    G --> Q["QuotaExceededException → 429 (M8)"]
+    G --> X["ExternalServiceException → 502 (M8)"]
     G --> S["anything else → 500<br/>no internal detail leaked"]
 ```
 
 Every response is RFC 9457 `ProblemDetails`. Expected exceptions are logged as warnings; unexpected ones as errors with the full stack.
 
+**The other 401 never reaches this handler** *(M6)*. `JwtBearer` rejects a missing or invalid access token before MediatR runs.
+
+**400 is shape; 403, 404 and 409 are state.** Validators throw the first; handlers throw the rest. A handler never throws `ValidationException` (Requirements §8).
+
 **The wiring trap**: `AddExceptionHandler<T>()` registers the handler, but nothing calls it without `app.UseExceptionHandler()` in the pipeline. Both compile and start cleanly either way.
 
 **Two different sources produce 400.** Model binding inside `[ApiController]` rejects malformed JSON *before* MediatR runs, and its response carries a `traceId`. A validator's `ValidationException` does not. That difference is the fastest way to tell a bad payload from a broken rule.
 
-### 4.6 The AI flow — planned (UC-06)
+### 4.6 The AI flow — planned (UC-06, M8)
 
 ```mermaid
 graph LR
-    N["user's note"] --> Q{"quota left?"}
-    Q -->|no| R["429 / quota error"]
-    Q -->|yes| AI["Gemini extracts<br/>candidate tasks"]
-    AI --> U["user reviews<br/>and approves"]
-    U --> T["tasks created as<br/>children of the note"]
-    T --> L["User.ConsumeTokens<br/>+ AiUsageLog, together"]
+    N["POST /api/notes/{id}/extract-tasks"] --> D{"note at<br/>max depth?"}
+    D -->|yes| R1["409"]
+    D -->|no| Q{"quota left<br/>for the estimate?"}
+    Q -->|no| R2["429"]
+    Q -->|yes| AI["AI provider<br/>suggests tasks"]
+    AI -->|fails| R3["502"]
+    AI --> L["RecordTokenUsage<br/>+ AiUsageLog, one save"]
+    L --> S["200 + suggestions<br/>nothing else written"]
+    S --> U["user approves one"]
+    U --> T["POST /api/tasks<br/>parent = the note"]
 ```
 
-Two design points already settled:
+**Provenance is parenthood.** An approved task is simply a child of its source note. The old schema had a dedicated `Tasks.SourceNoteId` column; the tree makes it unnecessary.
 
-**Provenance is parenthood.** An extracted task is simply a child of its source note. The old schema had a dedicated `Tasks.SourceNoteId` column; the tree makes it unnecessary.
+**Human in the loop, with no endpoint of its own** (ADR-28). Extraction returns suggestions and writes nothing but the usage record. Approval is the existing `POST /api/tasks`.
 
-**Human in the loop.** The AI suggests; the user approves; only then is anything written.
+**Usage is recorded where it is paid, not where it is used.** An earlier version of this flow recorded tokens after the user approved — a user who never approved would have extracted for free. The record now follows the provider call directly, and never throws (ADR-24).
 
-**The counter and the log must move together** — inside one method on `User` — or the fast quota check and the detailed history will drift apart.
+**The counter and the log move together** — inside one method on `User`, `RecordTokenUsage`, which replaces `ConsumeTokens` in M8 — or the fast quota check and the detailed history drift apart (ADR-16). How the counter survives two parallel extractions is still open (Requirements §13).
+
+**The provider** — Gemini is the current candidate, not yet a recorded decision (Requirements §13, question 1).
 
 ---
 
@@ -380,6 +410,8 @@ builder.HasDiscriminator<int>("Kind")
 
 An **integer** discriminator, not the default string: renaming a C# class later must not invalidate stored rows.
 
+**`Kind` never changes** (Requirements rule 3.2.8). EF Core derives the discriminator from the object's CLR type, and an object cannot change its type — a conversion would be a delete and a create, taking the whole subtree with it.
+
 `DbSet<Item>` returns everything; `DbSet<Note>` and `DbSet<TaskItem>` filter by `Kind` automatically. **Repositories that resolve a parent must use `Items`** — a parent may be either type, and querying `Notes` would return `null` for every task parent, with no error and no clue.
 
 ### The six check constraints
@@ -417,9 +449,28 @@ M6:     JWT claim → CurrentUserService → ICurrentUserService → handlers
 
 Not one line in Application, Domain, or Infrastructure moves. Every handler and every handler test written today survives.
 
+### The M6 target, in one flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant DB
+    Client->>API: POST /api/auth/login
+    API->>DB: store the SHA-256 of the refresh token
+    API-->>Client: 200 { accessToken (15 min), refreshToken (7 days) }
+    Client->>API: any request + Bearer accessToken
+    Note over API: JwtBearer validates before MediatR — no valid token, 401
+    Client->>API: POST /api/auth/refresh { refreshToken }
+    API->>DB: revoke the old token (xmin-checked) + insert the new, one save
+    API-->>Client: 200 { new pair }
+```
+
+The decisions and their costs live in Requirements §9 and ADR-19 to ADR-21, ADR-27, ADR-29. Two traps are written down there before they happen: the claim name the user id arrives under, and `JwtBearer`'s five-minute default clock skew.
+
 ### Ownership enforcement today
 
-Parent-item ownership is checked **twice** — in the handler for a precise 403, and inside `Item.Initialize` because the entity trusts no caller.
+Parent-item ownership is checked **twice** — in the handler for a precise 403, and inside `Item.Initialize` because the entity trusts no caller. Depth follows the same shape from M5.1: the handler asks `parent.IsAtMaxDepth` for a precise 409, and the entity asks it again (ADR-30).
 
 Course ownership is checked in the handler **only**, because the entity receives a `Guid` rather than a `Course` object. This asymmetry is known and accepted; a future handler that forgets the check has no safety net beneath it.
 
@@ -433,7 +484,7 @@ Domain and Application depend on no database and no web server, so the whole bus
 dotnet test
 ```
 
-Currently **43 tests** across the two projects.
+The current count is whatever `dotnet test` reports. It is not written here, because a number in a document goes stale with the next test. From M5.1 a third project, `StudyHub.Infrastructure.Tests`, runs in the same command — still with no database.
 
 This is a measurable payoff of the architecture, not a theoretical one. Compare it to the manual `.http` file, which needs Postgres running, the API running, and human inspection of each response — necessary for end-to-end confidence, far too slow for every change.
 
@@ -442,6 +493,8 @@ This is a measurable payoff of the architecture, not a theoretical one. Compare 
 1. **A successful build proves nothing.** Verify the specific effect: an HTTP status code, a row in `psql`, a passing test.
 2. **Prove a constraint by breaking it *and* by inserting a row that should pass.** One without the other is half an answer — and read *which* constraint the error names. A malformed statement produces a red error and no inserted row, exactly like a working constraint does.
 3. **A change with no externally observable behaviour is verified by reading the file.** When no code path calls the changed method yet, the build passes, the tests pass, and every endpoint behaves identically whether or not the change was ever applied. Nothing else will catch it.
+
+Requirements §10 adds two consequences: a proof belongs to the layer where the behaviour lives, and a concurrency rule needs a concurrent proof.
 
 ---
 
@@ -504,24 +557,32 @@ Paste one statement per line — a multi-line paste can merge with the previous 
 Documented on purpose. A learning project is more useful when its gaps are visible.
 
 ### Security
-- **No authentication.** The `X-User-Id` header is a full bypass (§6). Highest-priority item; M6.
-- **Registration conflict messages name the email**, enabling account enumeration. A known trade for a friendlier message.
+- **No authentication.** The `X-User-Id` header is a full bypass (§6). M6, right after the M5.1 cleanup.
+- **Registration reveals whether an email is in use** — an accepted risk that also undermines login's anti-enumeration rules (Requirements §9.4).
 - **Course ownership is guarded in one layer only** (§6).
+
+### Live defects — fixed in M5.1
+- **A parent at maximum depth returns 500 instead of 409** (§4.3).
+- **A `dueDate` that is not UTC returns 500 instead of 400.** Npgsql writes only `Kind = Utc`, and nothing rejects the other kinds before the save (Requirements §14.1).
+- **The `Email` converter validates on read**, so one corrupt row would fail every read of that user (§3).
+- **Three exception types share one file**, and two source files are not saved as UTF-8 — they export as binary.
 
 ### Functionality
 - **No read queries at all.** Content can be created and deleted, but only inspected through `psql`.
 - **No update handlers.** `UpdateStatus`, `UpdateContent`, `UpdateSchedule`, and `UpdateDetails` exist on the entities with nothing calling them — behaviour that is written but unreachable.
-- **No DTOs.** Controllers return anonymous objects. `CODING_STANDARDS.md` §4 requires DTOs; needed before the first read query, since returning `Item` directly would leak every field.
+- **No DTOs.** Controllers return anonymous objects. `CODING_STANDARDS.md` §5 requires DTOs; needed before the first read query, since returning `Item` directly would leak every field.
 - **`DefaultMonthlyTokenQuota` is a constant** in `RegisterUserCommandHandler` rather than configuration.
 
 ### Design limits
 - **Node moving is not supported.** Three other decisions — stored depth, inherited `CourseId`, and the absence of cycle detection — are safe *only* because of this. Adding moving invalidates all three at once.
-- **Correct restore is impossible as designed.** After a cascade delete, nothing distinguishes a child deleted deliberately from one deleted by cascade. Fixing it means `DeletedAt` instead of `IsDeleted` — cheap now, expensive once real data exists.
-- **Repository + Unit of Work over EF Core is technically redundant.** `DbContext` is already a unit of work and `DbSet<T>` already a repository. Kept because the pattern is worth learning, at the cost of an extra abstraction and the loss of `IQueryable` composition at the boundary.
+- **Correct restore is impossible as designed.** After a cascade delete, nothing distinguishes a child deleted deliberately from one deleted by cascade. Fixing it means `DeletedAt` plus `DeletedBatchId` instead of `IsDeleted` — scheduled for M7 while it is still cheap, before real data exists (ADR-25).
+- **Repository + Unit of Work over EF Core is technically redundant.** `DbContext` is already a unit of work and `DbSet<T>` already a repository. Kept because the pattern is worth learning, at the cost of an extra abstraction and the loss of `IQueryable` composition at the boundary — so read queries must project inside Infrastructure; where exactly is open (Requirements §13).
+- **Last write wins on content edits.** Only refresh tokens get a concurrency token; two tabs editing one item overwrite each other silently (Requirements §12).
 
 ### Infrastructure
 - **No integration tests.** Infrastructure and API are covered by manual verification only. M10.
 - **The API is not containerized.** Only Postgres runs in Docker.
 - **No rate limiting.** M10.
+- **Refresh tokens are never deleted** *(from M6)* — expired and revoked rows accumulate until the cleanup job in M10.
 
 Full roadmap: [`Requirements.md`](Requirements.md) §11.
