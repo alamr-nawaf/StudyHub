@@ -20,6 +20,7 @@ public sealed record Email
 
         return new Email(normalized);
     }
+    public static Email FromPersisted(string value) => new(value);
 
     public override string ToString() => Value;
 }

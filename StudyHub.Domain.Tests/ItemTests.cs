@@ -128,4 +128,34 @@ public class ItemTests
         task.Status.Should().Be(StudyTaskStatus.Pending);
         task.Priority.Should().Be(TaskPriority.Medium);
     }
+    [Fact]
+    public void IsAtMaxDepth_AtDepthFour_ShouldBeTrue()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var d0 = Note.Create(userId, "Depth 0");
+        var d1 = Note.Create(userId, "Depth 1", parent: d0);
+        var d2 = Note.Create(userId, "Depth 2", parent: d1);
+        var d3 = Note.Create(userId, "Depth 3", parent: d2);
+        var d4 = Note.Create(userId, "Depth 4", parent: d3);
+
+        // Act
+        var result = d4.IsAtMaxDepth;
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsAtMaxDepth_BelowMaximum_ShouldBeFalse()
+    {
+        // Arrange
+        var root = Note.Create(Guid.NewGuid(), "Depth 0");
+
+        // Act
+        var result = root.IsAtMaxDepth;
+
+        // Assert
+        result.Should().BeFalse();
+    }
 }

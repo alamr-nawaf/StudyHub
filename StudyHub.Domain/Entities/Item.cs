@@ -7,6 +7,7 @@ public abstract class Item : AuditableEntity
 {
     // خمسة مستويات: من صفر إلى أربعة
     public const int MaxDepth = 4;
+    public bool IsAtMaxDepth => Depth >= MaxDepth;
 
     public Guid UserId { get; private set; }
     public Guid? CourseId { get; private set; }
@@ -43,7 +44,7 @@ public abstract class Item : AuditableEntity
             if (parent.IsDeleted)
                 throw new InvalidOperationException("Cannot nest under a deleted item.");
 
-            if (parent.Depth >= MaxDepth)
+            if (parent.IsAtMaxDepth)
                 throw new InvalidOperationException("Maximum nesting depth reached.");
 
             ParentItemId = parent.Id;

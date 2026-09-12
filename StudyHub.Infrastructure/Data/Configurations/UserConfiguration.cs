@@ -22,5 +22,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
                .HasMaxLength(150);
 
         builder.HasIndex(u => u.Email).IsUnique();
+        // تحويل كائن القيمة: الكيان يحمل النوع، والقاعدة تخزّن نصًا عاديًا
+        builder.Property(u => u.Email)
+               .HasConversion(
+                   email => email.Value,               // إلى القاعدة
+                   value => Email.FromPersisted(value)) // من القاعدة — بلا تحقق
+               .IsRequired()
+               .HasMaxLength(150);
     }
 }

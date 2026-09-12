@@ -38,6 +38,8 @@ public class CreateNoteCommandHandler : IRequestHandler<CreateNoteCommand, Guid>
             // 403 لا 404: الرسالة تفرّق بين "غير موجود" و"ليس لك"
             if (parent.UserId != userId)
                 throw new ForbiddenException("You do not own the parent item.");
+            if (parent.IsAtMaxDepth)
+                throw new ConflictException("The parent item is at the maximum depth.");
         }
         else if (request.CourseId.HasValue)
         {
@@ -47,6 +49,7 @@ public class CreateNoteCommandHandler : IRequestHandler<CreateNoteCommand, Guid>
             if (course.UserId != userId)
                 throw new ForbiddenException("You do not own this course.");
         }
+
 
         // الكيان يعيد فحص الملكية والعمق والحذف — الطبقة الأخيرة
         var note = Note.Create(userId, request.Title, request.Content, parent, request.CourseId);

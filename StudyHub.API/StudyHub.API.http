@@ -1,5 +1,5 @@
 @baseUrl = http://localhost:5158
-@userId = a72789ff-f9a4-4506-baab-f55ae2514d40
+@userId = da3b243e-8356-4c2d-8dee-e93a2af308aa
 
 ### 1. تسجيل صحيح - المتوقع: 201 Created
 POST {{baseUrl}}/api/auth/register
@@ -140,3 +140,71 @@ X-User-Id: {{userId}}
 ### 19. حذف الكورس - المتوقع: 204
 DELETE {{baseUrl}}/api/courses/d066a657-06b9-40ca-acc0-c6038305dab7
 X-User-Id: {{userId}}
+
+### تاريخ بإزاحة — المتوقع قبل الإصلاح: 500
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Offset date", "dueDate": "2026-10-01T14:00:00+03:00" }
+
+### تاريخ بلا إزاحة — المتوقع قبل الإصلاح: 500
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Naive date", "dueDate": "2026-10-01T14:00:00" }
+
+### عزل: مهمة بلا تاريخ
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "No date at all" }
+
+### D0 — جذر، عمق 0
+# @name note0
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Depth 0" }
+
+### D1 — عمق 1
+# @name note1
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Depth 1", "parentItemId": "{{note0.response.body.$.noteId}}" }
+
+### D2 — عمق 2
+# @name note2
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Depth 2", "parentItemId": "{{note1.response.body.$.noteId}}" }
+
+### D3 — عمق 3
+# @name note3
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Depth 3", "parentItemId": "{{note2.response.body.$.noteId}}" }
+
+### D4 — عمق 4، آخر مستوى مسموح
+# @name note4
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Depth 4", "parentItemId": "{{note3.response.body.$.noteId}}" }
+
+### D5 — السادس: المتوقَّع قبل الإصلاح 500، وبعده 409
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+X-User-Id: {{userId}}
+
+{ "title": "Depth 5 - should fail", "parentItemId": "{{note4.response.body.$.noteId}}" }

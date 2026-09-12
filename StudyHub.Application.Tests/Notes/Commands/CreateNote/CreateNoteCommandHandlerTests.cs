@@ -132,4 +132,30 @@ public class CreateNoteCommandHandlerTests
 
         _itemRepositoryMock.Verify(r => r.Add(It.IsAny<Item>()), Times.Never);
     }
+    [Fact]
+    public async Task Handle_ParentAtMaxDepth_ShouldThrowConflict()
+    {
+        // Arrange
+        var d0 = Note.Create(_currentUserId, "Depth 0");
+        var d1 = Note.Create(_currentUserId, "Depth 1", parent: d0);
+        var d2 = Note.Create(_currentUserId, "Depth 2", parent: d1);
+        var d3 = Note.Create(_currentUserId, "Depth 3", parent: d2);
+        var parent = Note.Create(_currentUserId, "Depth 4", parent: d3);
+
+        _itemRepositoryMock
+            .Setup(r => r.GetByIdAsync(parent.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parent);
+
+        var command = new CreateNoteCommand("Too deep", null, parent.Id, null);
+
+        // Act
+        var act = () => _handler.Handle(command, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ConflictException>();
+
+        _unitOfWorkMock.Verify(
+            u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

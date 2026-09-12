@@ -38,6 +38,8 @@ public class CreateTaskCommandHandler : IRequestHandler<CreateTaskCommand, Guid>
             // 403 لا 404: نفرّق بين "غير موجود" و"ليس لك"
             if (parent.UserId != userId)
                 throw new ForbiddenException("You do not own the parent item.");
+            if (parent.IsAtMaxDepth)
+                throw new ConflictException("The parent item is at the maximum depth.");
         }
         else if (request.CourseId.HasValue)
         {
