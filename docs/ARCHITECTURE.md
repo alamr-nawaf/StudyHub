@@ -6,7 +6,7 @@
 > For **code style rules**, see [`CODING_STANDARDS.md`](CODING_STANDARDS.md).
 > For **problems hit and how they were fixed**, see [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 >
-> **v3.0** — aligned with `Requirements.md` v3.0. It follows the same reading convention: a statement tagged with a milestone — *(M5.1)*, *(M6)* — describes something not built yet; an untagged statement describes code that exists today. (v2.0 was the rewrite after the M5 restructure, when the `Notes` and `Tasks` tables of v1 disappeared.)
+> **v3.0** — aligned with `Requirements.md` v3.0. It follows the same reading convention: a statement tagged with a milestone — *(M6)*, *(M7)* — describes something not built yet; an untagged statement describes code that exists today. (v2.0 was the rewrite after the M5 restructure, when the `Notes` and `Tasks` tables of v1 disappeared.)
 
 ---
 
@@ -30,7 +30,7 @@ StudyHub/
 ├── StudyHub.API                → ASP.NET Core host. Thin — no business logic.
 ├── StudyHub.Domain.Tests       → Unit tests for entity rules.
 ├── StudyHub.Application.Tests  → Unit tests for handlers, dependencies mocked.
-├── StudyHub.Infrastructure.Tests → Unit tests for infrastructure code that needs no database. (M5.1)
+├── StudyHub.Infrastructure.Tests → Unit tests for infrastructure code that needs no database.
 └── docs/                       → Requirements, architecture, standards, troubleshooting, ERD.
 ```
 
@@ -70,7 +70,7 @@ BaseEntity
 
 The base class is split because a usage log is not an editable entity. Giving it `UpdatedAt` would create a column guaranteed to stay null forever. **Inheritance follows lifecycle, not convenience.**
 
-**Value object**: `Email` owns normalization and format checking. It exists because that logic was previously written twice — in `User.Create` and in `UserRepository` — and a divergence between the two would let a duplicate account walk straight past a unique index. From M5.1 the EF Core converter rebuilds it through `Email.FromPersisted`, which does not validate — a converter is a mapping, not a gate, and one corrupt row must not turn every read of that user into a 500 (Requirements §3.3).
+**Value object**: `Email` owns normalization and format checking. It exists because that logic was previously written twice — in `User.Create` and in `UserRepository` — and a divergence between the two would let a duplicate account walk straight past a unique index. The EF Core converter rebuilds it through `Email.FromPersisted`, which does not validate — a converter is a mapping, not a gate, and one corrupt row must not turn every read of that user into a 500 (Requirements §3.3).
 
 **Clock handling**: methods whose behaviour depends on time (`User.ResetQuotaIfNeeded`, `RefreshToken.IsActive`, `RefreshToken.Revoke`) take `utcNow` as a parameter, so they are testable with no clock abstraction. Everything else reads `DateTime.UtcNow` directly. This is a deliberate limit: a full `TimeProvider` injection across every entity would touch every call site and every test to buy testability in places nobody tests.
 
@@ -145,7 +145,7 @@ Refresh token rotation reads a row and writes it back, so two parallel requests 
 
 Moq fakes the interfaces declared in Application, so a test like "creating an item under another user's parent throws `ForbiddenException`" runs in milliseconds against no database. FluentAssertions makes failures readable at 2am.
 
-From M5.1, `StudyHub.Infrastructure.Tests` covers infrastructure code that needs no database — password hashing first, token generation in M6. Application tests never reference Infrastructure; the tests follow the same dependency rule as the code.
+`StudyHub.Infrastructure.Tests` covers infrastructure code that needs no database — password hashing today, token generation in M6. Application tests never reference Infrastructure; the tests follow the same dependency rule as the code.
 
 **Not automated yet**: EF Core queries and HTTP round-trips need integration testing against a containerized database — scheduled for M10.
 
@@ -255,7 +255,7 @@ sequenceDiagram
         H-->>Client: NotFoundException → 404
     else parent belongs to someone else
         H-->>Client: ForbiddenException → 403
-    else parent at maximum depth (M5.1)
+    else parent at maximum depth
         H-->>Client: ConflictException → 409
     else parent is valid
         H->>Ent: Note.Create(userId, title, content, parent, courseId)
@@ -273,13 +273,13 @@ sequenceDiagram
 | Layer | Checks | Why it exists |
 |---|---|---|
 | Validator | shape of the request | fails fast, before any I/O |
-| Handler | parent exists, is owned, has room *(M5.1)* | produces a precise 404, 403, or 409 |
+| Handler | parent exists, is owned, has room | produces a precise 404, 403, or 409 |
 | Entity | ownership, depth, deleted parent | **trusts no caller** — a handler that forgets cannot corrupt the tree |
 | Database | depth range, root/depth agreement, title, enum ranges | protects against anything writing outside the application |
 
 Duplication here is not waste. Each layer answers a different question: the handler answers *"what should the client be told?"*, the entity answers *"is this object valid?"*, the database answers *"is this row valid regardless of who wrote it?"*
 
-**A rule is written once and asked twice** *(M5.1, ADR-30)*. The handler asks `parent.IsAtMaxDepth`; `Item.Initialize` asks the same member. Restating the condition in the handler would put the rule in two places, free to drift. Until M5.1 the handler does not ask at all, so the request reaches the entity's guard and the client gets a 500 — the A5 failure shape, still open for this one rule.
+**A rule is written once and asked twice** (ADR-30). The handler asks `parent.IsAtMaxDepth`; `Item.Initialize` asks the same member. Restating the condition in the handler would put the rule in two places, free to drift. Before this shape existed the handler did not ask at all, so the request reached the entity's guard and the client got a 500 — the A5 failure shape, now closed for this rule.
 
 ### 4.4 Cascade delete — two shapes
 
@@ -470,7 +470,7 @@ The decisions and their costs live in Requirements §9 and ADR-19 to ADR-21, ADR
 
 ### Ownership enforcement today
 
-Parent-item ownership is checked **twice** — in the handler for a precise 403, and inside `Item.Initialize` because the entity trusts no caller. Depth follows the same shape from M5.1: the handler asks `parent.IsAtMaxDepth` for a precise 409, and the entity asks it again (ADR-30).
+Parent-item ownership is checked **twice** — in the handler for a precise 403, and inside `Item.Initialize` because the entity trusts no caller. Depth follows the same shape: the handler asks `parent.IsAtMaxDepth` for a precise 409, and the entity asks it again (ADR-30).
 
 Course ownership is checked in the handler **only**, because the entity receives a `Guid` rather than a `Course` object. This asymmetry is known and accepted; a future handler that forgets the check has no safety net beneath it.
 
@@ -484,7 +484,7 @@ Domain and Application depend on no database and no web server, so the whole bus
 dotnet test
 ```
 
-The current count is whatever `dotnet test` reports. It is not written here, because a number in a document goes stale with the next test. From M5.1 a third project, `StudyHub.Infrastructure.Tests`, runs in the same command — still with no database.
+The current count is whatever `dotnet test` reports. It is not written here, because a number in a document goes stale with the next test. A third project, `StudyHub.Infrastructure.Tests`, runs in the same command — still with no database.
 
 This is a measurable payoff of the architecture, not a theoretical one. Compare it to the manual `.http` file, which needs Postgres running, the API running, and human inspection of each response — necessary for end-to-end confidence, far too slow for every change.
 
@@ -557,15 +557,9 @@ Paste one statement per line — a multi-line paste can merge with the previous 
 Documented on purpose. A learning project is more useful when its gaps are visible.
 
 ### Security
-- **No authentication.** The `X-User-Id` header is a full bypass (§6). M6, right after the M5.1 cleanup.
+- **No authentication.** The `X-User-Id` header is a full bypass (§6). Closed by M6, the next milestone.
 - **Registration reveals whether an email is in use** — an accepted risk that also undermines login's anti-enumeration rules (Requirements §9.4).
 - **Course ownership is guarded in one layer only** (§6).
-
-### Live defects — fixed in M5.1
-- **A parent at maximum depth returns 500 instead of 409** (§4.3).
-- **A `dueDate` that is not UTC returns 500 instead of 400.** Npgsql writes only `Kind = Utc`, and nothing rejects the other kinds before the save (Requirements §14.1).
-- **The `Email` converter validates on read**, so one corrupt row would fail every read of that user (§3).
-- **Three exception types share one file**, and two source files are not saved as UTF-8 — they export as binary.
 
 ### Functionality
 - **No read queries at all.** Content can be created and deleted, but only inspected through `psql`.

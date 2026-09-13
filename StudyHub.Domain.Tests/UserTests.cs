@@ -1,6 +1,7 @@
 ﻿using FluentAssertions;
+using StudyHub.Domain.Authorization;
 using StudyHub.Domain.Entities;
-
+using StudyHub.Domain.Enums;
 namespace StudyHub.Domain.Tests;
 
 public class UserTests
@@ -64,5 +65,39 @@ public class UserTests
         user.ResetQuotaIfNeeded(DateTime.UtcNow.AddMonths(1));
 
         user.TokensUsedThisMonth.Should().Be(0);
+    }
+    [Fact]
+    public void Create_ShouldDefaultToUserRole()
+    {
+        var user = CreateSut();
+
+        user.Role.Should().Be(UserRole.User);
+    }
+
+    [Fact]
+    public void PromoteToAdmin_ShouldChangeRole()
+    {
+        var user = CreateSut();
+
+        user.PromoteToAdmin();
+
+        user.Role.Should().Be(UserRole.Admin);
+    }
+
+    [Fact]
+    public void Can_RegularUser_ShouldNotHaveAdminPermission()
+    {
+        var user = CreateSut();
+
+        user.Can(Permissions.UsersDeactivate).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Can_Admin_ShouldHaveAdminPermission()
+    {
+        var user = CreateSut();
+        user.PromoteToAdmin();
+
+        user.Can(Permissions.UsersDeactivate).Should().BeTrue();
     }
 }

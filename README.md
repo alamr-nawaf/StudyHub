@@ -84,6 +84,7 @@ StudyHub.Infrastructure     EF Core, PostgreSQL, security implementations.
 StudyHub.API                ASP.NET Core host. Thin — no business logic.
 StudyHub.Domain.Tests       Entity rules.
 StudyHub.Application.Tests  Handlers, dependencies mocked.
+StudyHub.Infrastructure.Tests  Infrastructure code that needs no database.
 ```
 
 Dependencies point inward only: `API → Infrastructure → Application → Domain`.
@@ -135,7 +136,7 @@ Every problem hit during development, with its root cause, is recorded in [`docs
 
 ## Progress
 
-M1–M5 complete: architecture, domain, schema, error handling, and the content tree with cascade soft-delete.
-**M5.1 (cleanup) is in progress; M6 (authentication) is next.**
+M1–M5.1 complete: architecture, domain, schema, error handling, the content tree with cascade soft-delete, and the M5.1 cleanup.
+**M6 (authentication) is next.**
 
 Full roadmap: [`docs/Requirements.md`](docs/Requirements.md) §11.

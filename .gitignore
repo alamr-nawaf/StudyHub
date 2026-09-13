@@ -2,3 +2,5 @@ bin/
 obj/
 .vs/
 *.user
+studyhub-source.txt
+export-source.ps1

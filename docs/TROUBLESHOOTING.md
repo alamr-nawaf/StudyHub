@@ -34,6 +34,7 @@ A record of every technical problem hit during development, how it was fixed, an
 **Problem**: `StudyHub.API.http` expects 409 for a duplicate email and 400 for invalid input. Both returned 500 with a stack trace, because nothing caught `ConflictException` or `ValidationException` at the boundary.
 **Fix**: Added `NotFoundException` and `ForbiddenException` to Application, and a `GlobalExceptionHandler` (`IExceptionHandler` + `AddProblemDetails`) in the API mapping each type to a status code and a `ProblemDetails` body.
 **Why**: An exception type carries meaning only inside the process. Without a translation layer at the edge, every deliberate business rule arrives at the client as an anonymous server failure.
+**Repeat (M5.1)**: The same shape, narrowed. `GlobalExceptionHandler` now covers the four Application exception types, but a domain invariant that throws `InvalidOperationException` still fell through to 500 — nesting under a parent already at maximum depth was one. Published the rule as `Item.IsAtMaxDepth` so the handler can ask it and return 409, and pointed `Initialize` at the same member so the rule exists once; `>= MaxDepth` now appears exactly once in the whole project. The entity guard stays: if it ever fires, a handler forgot to ask, and 500 is the honest answer to a bug.
 
 ### A6. `ValidationBehavior` violated the project's own async standard (M5)
 **Problem**: Found during code review — no runtime error. The behavior called the synchronous `Validate()` and never passed `CancellationToken`, against the rule in `CODING_STANDARDS.md` §2.
@@ -94,6 +95,16 @@ A record of every technical problem hit during development, how it was fixed, an
 **Problem**: The plan called for `WITH RECURSIVE` to fetch a subtree, reasoning that level-by-level fetching means one query per level. True in general — but depth is capped at five, so level-by-level costs at most five queries.
 **Fix**: Kept the subtree walk in LINQ, looping level by level. Raw SQL would have cost a hand-maintained query string, a result shape EF constrains, and — critically — a query the soft-delete filter does not touch at all.
 **Why**: "One query per level" is only alarming when the number of levels is unknown. A bound turns an unbounded cost into a constant, and an optimization justified by the unbounded case stops being justified with it.
+
+### A18. A value converter validated on the way out of the database (M5.1)
+**Problem**: Found during code review — no runtime error yet. `UserConfiguration` rebuilt the `Email` value object with `Email.Create`, which throws on a malformed address. Any row whose email column was corrupted by a manual `UPDATE`, an import, or a future migration would make every read of that user throw — including the login lookup — turning a rejected credential into a 500.
+**Fix**: Added `Email.FromPersisted`, a non-validating factory, and pointed the converter at it. `Email.Create` stays on every entry path. One test asserts that `FromPersisted` passes an invalid value through untouched, so the difference between the two factories reads as deliberate rather than as a forgotten check.
+**Why**: A converter is a mapping, not a gate. Validation belongs where untrusted input enters the system; running it again on the way out re-judges data the system already accepted, and turns one bad row into a total outage for its owner instead of a single rejection. Same shape as D4, in a different place.
+
+### A19. A client date without a UTC offset reached the database as a 500 (M5.1)
+**Problem**: Found during code review, then reproduced. `POST /api/tasks` with `"dueDate": "2026-10-01T14:00:00"` — or with an explicit offset like `+03:00` — returned 500. Npgsql refuses to write a `DateTime` whose `Kind` is not `Utc` to a `timestamptz` column, and the JSON reader produces `Unspecified` for a naive value and `Local` for an offset one. No request in `StudyHub.API.http` had ever sent a `dueDate`, which is the only reason it went unnoticed.
+**Fix**: Added a UTC rule to `CreateTaskCommandValidator` rejecting any `Kind` other than `Utc`, with six validator tests covering it and the course-inheritance rule beside it. `DueDate` is the only `DateTime` reaching the API from a client; every other timestamp is written by an entity from `DateTime.UtcNow`.
+**Why**: A rule that lives only in a driver's write path surfaces as a server error instead of a rejection. The boundary that accepts a value is the boundary that must judge it — and an input shape nothing in the manual test file ever sends is an input shape nobody has verified.
 
 ---
 
@@ -198,6 +209,7 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: Wrapped the call in `try/catch (SaltParseException)` returning `false`.
 **Why**: A verification function has exactly two correct answers. Any third outcome — an exception included — converts a rejected login into a server error, and hands the caller a distinction it should never see.
 **Correction**: this entry was written before the change was applied. The file was not actually edited until later in M5, and nothing detected the gap. See G4.
+**Repeat (M5.1)**: The original `catch (SaltParseException)` was too narrow. A unit test over five malformed shapes found two that escape it: an empty string raises `ArgumentException` from the library's own guard, and a truncated hash like `$2a$12$short` passes the version check then raises `ArgumentOutOfRangeException` from a `Substring` inside `HashPassword`. Added an early `IsNullOrWhiteSpace` guard and widened the catch to `SaltParseException or ArgumentException`, which covers the out-of-range subclass and any corrupt shape not yet seen. The lesson beneath the lesson: the first fix was verified by reading the code, which can only confirm the failure mode you already imagined — the shapes a corrupt row actually takes are found by trying them.
 
 ### D5. BCrypt silently ignores every byte past the first 72 (M5)
 **Problem**: Found during code review. The algorithm truncates its input at 72 bytes with no error, so two long passwords sharing their first 72 bytes authenticate each other. `MaximumLength(72)` in the validator would not have closed the gap either — FluentValidation counts characters, and one Arabic character is two bytes.
@@ -209,6 +221,11 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: Found during code review, while adding the `Email` value object. With a value converter in place, EF Core sees one text column and knows nothing about the object's inner property — a query filtering on `u.Email.Value` compiles cleanly and fails at runtime.
 **Fix**: Built the `Email` before the query and compared the whole object: `u.Email == normalized`.
 **Why**: A value converter maps the type, not its members. Anything a query asks of the object beyond equality has no SQL to be translated into.
+
+### D7. A package version arrived through a dev-only dependency and stopped at the project boundary (M5.1)
+**Problem**: `MSB3277` — conflicting versions of `Microsoft.EntityFrameworkCore.Relational`, 10.0.4 against 10.0.11 — appeared the moment `StudyHub.Infrastructure.Tests` was added. `StudyHub.Infrastructure` itself had built cleanly for weeks. `dotnet list package --include-transitive` showed 10.0.11 inside Infrastructure and 10.0.4 inside the test project, from the same graph.
+**Fix**: Added an explicit `PackageReference` to `Microsoft.EntityFrameworkCore.Relational` in `StudyHub.Infrastructure`, without `PrivateAssets`, so it flows to consuming projects.
+**Why**: The higher version was reaching Infrastructure only through `Microsoft.EntityFrameworkCore.Design`, which carries `PrivateAssets: all` and therefore does not cross a project reference. A project that uses a package's API — `HasCheckConstraint` and `HasFilter` come from Relational — must declare it; relying on a transitive path means the version is decided by a graph whose shape changes depending on who is looking at it.
 
 ---
 
@@ -253,6 +270,14 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: An `INSERT` written to test `CK_Task_Status` returned `syntax error at or near "INTO"`, with a fragment of the *previous* query still visible in the error text. The statement never parsed, so the constraint was never exercised.
 **Fix**: Re-sent the same `INSERT` on a single line; it was then correctly rejected by `CK_Task_Status`.
 **Why**: At a glance the result looked like proof — a red error naming the right table and no row inserted, which is exactly what a working constraint produces. Read *which* error came back, not merely that one did.
+
+### F4. A stale `@userId` in the `.http` file surfaced as a 500, not a 404 (M5.1)
+**Problem**: Every `POST /api/tasks` returned 500 while verifying an unrelated date defect. The log showed `PostgresException 23503` — `FK_Items_Users_UserId`. The `@userId` variable still held an id from a database that had since been recreated, so `Guid.TryParse` passed, no handler asks whether the current user exists, and the failure surfaced only at save time.
+**Fix**: Registered a fresh user and updated the variable. No code changed. Translating `23503` in `UnitOfWork` is scheduled in M6 step 6.4, alongside the concurrency-exception translation that touches the same method.
+**Why**: Two causes met. A manual test file carries data-dependent state that expires silently when the database is reset — nothing in it fails loudly, the ids simply stop matching. And `UnitOfWork` translates only `23505`, so every other PostgreSQL error state arrives as a 500 that names nothing; the `SqlState` in the log is the first thing to read before suspecting the feature you just touched.
+
+### F5. Four healthy source files were reported as binary by the repository export tool (M5.1)
+**Not a bug.** All four are valid UTF-8 with a BOM — first bytes `EF BB BF`, no NUL bytes anywhere — verified by reading the bytes rather than trusting the label. `[Binary file]` came from the export tool's own detection, and it spread: two files carried the label from the start, and two more acquired it immediately after being edited, while their bytes stayed correct throughout. A re-save "fix" was performed on the first two and changed nothing, because nothing was wrong. A high proportion of Arabic comments was ruled out as the trigger — `ForbiddenException.cs` is 49% non-ASCII bytes and exports fine. The real cost was a diagnosis built on a tool's verdict instead of on the file, and two documents briefly recording a defect that never existed.
 
 ---
 

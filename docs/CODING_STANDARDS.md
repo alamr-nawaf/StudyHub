@@ -29,7 +29,7 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Time as a parameter**: a method whose behaviour depends on the current time takes `utcNow` as an argument (`ResetQuotaIfNeeded(DateTime utcNow)`, `RefreshToken.IsActive(DateTime utcNow)`). Methods that merely stamp `UpdatedAt` read `DateTime.UtcNow` directly. Do not inject a clock abstraction across every entity to buy testability nobody uses.
 
-**UTC only.** Every timestamp is UTC. The validator of any command that carries a `DateTime` rejects a value whose `Kind` is not `Utc` *(M5.1)* — Npgsql refuses to write anything else, and the alternative to a 400 is a 500 (Requirements §14.1).
+**UTC only.** Every timestamp is UTC. The validator of any command that carries a `DateTime` rejects a value whose `Kind` is not `Utc` — Npgsql refuses to write anything else, and the alternative to a 400 is a 500 (Requirements §14.1).
 
 ---
 
@@ -52,15 +52,15 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Every entity is created through a static factory method** (`Note.Create`, `User.Create`) that validates its input and throws on violation. There is no public constructor.
 
-**Entities enforce their own invariants and trust no caller.** `Item.Initialize` re-checks ownership, parent state, and depth even though the handler has already asked *(depth from M5.1)*. A handler that forgets a check must not be able to corrupt data.
+**Entities enforce their own invariants and trust no caller.** `Item.Initialize` re-checks ownership, parent state, and depth even though the handler has already asked. A handler that forgets a check must not be able to corrupt data.
 
-**A rule the handler must ask about is published as a query on the entity** — `Item.IsAtMaxDepth` *(M5.1)*. The handler asks it to return a precise 4xx; the mutator asks the same member and throws. Never restate the condition in the handler: the rule would then exist twice and could drift (ADR-30).
+**A rule the handler must ask about is published as a query on the entity** — `Item.IsAtMaxDepth`. The handler asks it to return a precise 4xx; the mutator asks the same member and throws. Never restate the condition in the handler: the rule would then exist twice and could drift (ADR-30).
 
 **Behaviour before columns.** An entity is written from what its use cases must *do*, not from what the ERD shows. A column with no method able to write it is decoration; an unexposed behaviour with private setters is not merely missing but impossible (A2).
 
 **Inheritance follows lifecycle.** `BaseEntity` (`Id`, `CreatedAt`) is for everything; `AuditableEntity` adds `UpdatedAt` for entities that change. A write-once record inherits the former.
 
-**Value objects for rules that would otherwise be duplicated.** `Email` exists because normalization was written in two layers, and a divergence there defeats a unique index (A9). Value objects are `record` types with private constructors and a static `Create`. A value object read back from the database is rebuilt through a non-validating `FromPersisted`, called only by the EF Core converter *(M5.1)* — a converter is a mapping, not a gate (Requirements §3.3).
+**Value objects for rules that would otherwise be duplicated.** `Email` exists because normalization was written in two layers, and a divergence there defeats a unique index (A9). Value objects are `record` types with private constructors and a static `Create`. A value object read back from the database is rebuilt through a non-validating `FromPersisted`, called only by the EF Core converter — a converter is a mapping, not a gate (Requirements §3.3).
 
 **Exception messages are English; comments are Arabic.** Messages reach the client and the logs; comments explain intent to the author. Comments state *why*, never *what* — the code already says what.
 
@@ -157,7 +157,7 @@ e.g. `Create_UnderParentOfAnotherUser_ShouldThrow`
 
 **Every conditional validator rule gets its own test.** A rule written with `When` or `Unless` has no other proof (Requirements §10).
 
-**Infrastructure code that needs no database is tested in `StudyHub.Infrastructure.Tests`** *(M5.1)*. Application tests never reference Infrastructure.
+**Infrastructure code that needs no database is tested in `StudyHub.Infrastructure.Tests`**. Application tests never reference Infrastructure.
 
 **Test the capability, not only the rule.** `Create_TaskUnderNote_ShouldSucceed` guards no invariant; it documents a deliberate design decision, and will fail loudly if someone later restricts the parent type.
 
@@ -183,7 +183,7 @@ Requirements §10 records two consequences: a proof belongs to the layer where t
 
 **A document that contradicts the code is worse than no document.** When a change makes a statement in `Requirements.md`, `ARCHITECTURE.md`, `CODING_STANDARDS.md`, or `README.md` false, fix it in the same session — not later. `Requirements.md` is the reference: when two documents disagree, it wins and the other one is corrected.
 
-**Tag what is not built yet.** A statement about unbuilt code carries the milestone that delivers it — *(M5.1)*, *(M6)* — and loses the tag in the session that builds it. An untagged statement describes code that exists. Never write a number that the next commit changes, such as a test count.
+**Tag what is not built yet.** A statement about unbuilt code carries the milestone that delivers it — *(M6)*, *(M7)* — and loses the tag in the session that builds it. An untagged statement describes code that exists. Never write a number that the next commit changes, such as a test count.
 
 **Never document a change as done before applying it.** Write the entry after the change exists and has been verified (G4).
 

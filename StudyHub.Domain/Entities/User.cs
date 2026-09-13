@@ -1,6 +1,7 @@
-﻿using StudyHub.Domain.Common;
+﻿using StudyHub.Domain.Authorization;
+using StudyHub.Domain.Common;
+using StudyHub.Domain.Enums;
 using StudyHub.Domain.ValueObjects;
-
 namespace StudyHub.Domain.Entities;
 
 public sealed class User : AuditableEntity
@@ -15,6 +16,7 @@ public sealed class User : AuditableEntity
     public int TokensUsedThisMonth { get; private set; }
     public DateTime LastTokenResetDate { get; private set; }
     public bool IsActive { get; private set; }
+    public UserRole Role { get; private set; }
 
     private User() { }
 
@@ -37,7 +39,8 @@ public sealed class User : AuditableEntity
             MonthlyTokenQuota = monthlyQuota,
             TokensUsedThisMonth = 0,
             LastTokenResetDate = DateTime.UtcNow,
-            IsActive = true
+            IsActive = true,
+             Role = UserRole.User
         };
     }
 
@@ -73,6 +76,18 @@ public sealed class User : AuditableEntity
         IsActive = false;
         UpdatedAt = DateTime.UtcNow;
     }
+    // المسار الوحيد إلى Admin، ومسمّى بصوت عالٍ ليظهر في أي مراجعة.
+    // التنزيل غير مدعوم حتى تطلبه حاجة حقيقية (Requirements §12)
+    public void PromoteToAdmin()
+    {
+        if (Role == UserRole.Admin) return;   // عملية مُتسامحة مثل Deactivate
+
+        Role = UserRole.Admin;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    // القاعدة تُسأل من مكان واحد — نفس شكل IsAtMaxDepth (ADR-30)
+    public bool Can(string permission) => RolePermissions.Has(Role, permission);
 
     public void ChangePassword(string newPasswordHash)
     {
