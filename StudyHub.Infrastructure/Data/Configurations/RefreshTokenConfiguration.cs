@@ -20,5 +20,8 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
                .WithMany()
                .HasForeignKey(r => r.UserId)
                .OnDelete(DeleteBehavior.Cascade);
+        builder.Property<uint>("xmin")
+       .HasColumnType("xid")
+       .IsRowVersion();
     }
 }

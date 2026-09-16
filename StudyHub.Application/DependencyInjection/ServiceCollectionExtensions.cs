@@ -9,6 +9,9 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
+        // رسائل FluentValidation الافتراضية تُترجَم حسب ثقافة الجهاز، فيتغيّر جسم الرد
+        // بتغيّر الخادم. العقد في §8 لا يعرف لغة — نثبّته على الإنجليزية
+        ValidatorOptions.Global.LanguageManager.Enabled = false;
         services.AddMediatR(cfg =>
             cfg.RegisterServicesFromAssembly(typeof(ServiceCollectionExtensions).Assembly));
 

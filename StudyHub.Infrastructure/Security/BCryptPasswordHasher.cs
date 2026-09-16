@@ -3,7 +3,7 @@ using SaltParseException = BCrypt.Net.SaltParseException;
 using StudyHub.Application.Common.Interfaces;
 
 namespace StudyHub.Infrastructure.Security;
-
+// يجزّئ كلمات المرور بـ BCrypt ويتحقق منها؛ أي هاش مشوَّه اعتمادٌ مرفوض لا عطل
 public class BCryptPasswordHasher : IPasswordHasher
 {
 
@@ -30,4 +30,8 @@ public class BCryptPasswordHasher : IPasswordHasher
             return false;
         }
     }
+    // static: يُحسب مرة واحدة لكل عملية لا مرة لكل طلب — عملية BCrypt واحدة عمرها ربع ثانية
+    private static readonly string Dummy = BC.EnhancedHashPassword("no-such-user", WorkFactor);
+
+    public string DummyHash => Dummy;
 }

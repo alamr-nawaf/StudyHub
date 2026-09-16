@@ -52,6 +52,8 @@ Domain never knows that EF Core, ASP.NET Core, or PostgreSQL exist. Application 
 
 Entities with private setters, private constructors, and static factory methods that enforce invariants at creation time.
 
+`Authorization/` holds the permission model: `Permissions` (string constants, one per capability) and `RolePermissions` (the role-to-capabilities map). Both are plain C# with no dependency, so the zero-dependency rule holds while ASP.NET Core still consumes the constants as policy names. **The map lives here, not in the API layer, so that one map has two callers** — the endpoint policy asks it from the `role` claim, and `User.Can` asks it from the entity. A map in the API layer would be invisible to Application, and a handler cannot ask a question it cannot see. The policy wiring itself arrives in M6; see Requirements §9.5 and ADR-31.
+
 **Structure:**
 
 ```
@@ -133,19 +135,24 @@ Refresh tokens are stored hashed, but with a **deterministic** hash. Every refre
 
 SHA-256 is safe here precisely because a refresh token is high-entropy random data, unlike a human-chosen password.
 
-### Access tokens — `Microsoft.IdentityModel.JsonWebTokens` *(M6)*
+### Access tokens — `Microsoft.IdentityModel.JsonWebTokens`
+
+Login issues them; nothing validates them yet. `POST /api/auth/login` verifies the password against BCrypt, checks `IsActive`, and returns a signed access token plus a refresh token whose SHA-256 hash is the only form stored. Every refusal — unknown email, wrong password, deactivated account — is the same 401 body, and `Verify` runs against a dummy hash even when no user was found, so the two cases cannot be told apart by response time.
+
 
 Tokens are written with `JsonWebTokenHandler` — the handler `JwtBearer` has used to read them since ASP.NET Core 8. `System.IdentityModel.Tokens.Jwt` is the previous generation of the same library, and writing with one handler while reading with the other is a known source of claim-name surprises (Requirements ADR-29, §9.1).
 
-### Concurrency — PostgreSQL `xmin` *(M6)*
+### Concurrency — PostgreSQL `xmin`
 
 Refresh token rotation reads a row and writes it back, so two parallel requests could both succeed and fork one session into two. PostgreSQL changes the hidden `xmin` column on every update; EF Core maps it as a shadow concurrency token, so the second save fails instead. No column is added and no Domain type gains a field (Requirements ADR-27, §14.4).
+
+Proven, not assumed: with SQL command logging on, a rotation logs `UPDATE "RefreshTokens" SET ... WHERE "Id" = @p3 AND xmin = @p4`. The same log shows the revoke and the insert leaving as one command, which is why §9.3 forbids adding an explicit transaction on top of the single save.
 
 ### Testing — xUnit + Moq + FluentAssertions
 
 Moq fakes the interfaces declared in Application, so a test like "creating an item under another user's parent throws `ForbiddenException`" runs in milliseconds against no database. FluentAssertions makes failures readable at 2am.
 
-`StudyHub.Infrastructure.Tests` covers infrastructure code that needs no database — password hashing today, token generation in M6. Application tests never reference Infrastructure; the tests follow the same dependency rule as the code.
+`StudyHub.Infrastructure.Tests` covers infrastructure code that needs no database — password hashing and token generation. Application tests never reference Infrastructure; the tests follow the same dependency rule as the code.
 
 **Not automated yet**: EF Core queries and HTTP round-trips need integration testing against a containerized database — scheduled for M10.
 
@@ -511,17 +518,23 @@ dotnet user-secrets set "ConnectionStrings:DefaultConnection" \
   "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword"
 cd ..
 
-# 3. Set the environment variable for design-time commands (per terminal session)
+# 3. Store the JWT signing key — the app refuses to start without one of at least 32 bytes
+#    PowerShell 5.1 and 7 both:
+#      $bytes = New-Object byte[] 48
+#      [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+#      dotnet user-secrets set "Jwt:Key" ([Convert]::ToBase64String($bytes))
+
+# 4. Set the environment variable for design-time commands (per terminal session)
 #    PowerShell:  $env:STUDYHUB_DB_CONNECTION = "Host=localhost;..."
 #    cmd.exe:     set "STUDYHUB_DB_CONNECTION=Host=localhost;..."
 
-# 4. Apply the schema
+# 5. Apply the schema
 dotnet ef database update --project StudyHub.Infrastructure --startup-project StudyHub.API
 
-# 5. Run
+# 6. Run
 dotnet run --project StudyHub.API
 
-# 6. Test the business logic
+# 7. Test the business logic
 dotnet test
 ```
 
@@ -580,3 +593,5 @@ Documented on purpose. A learning project is more useful when its gaps are visib
 - **Refresh tokens are never deleted** *(from M6)* — expired and revoked rows accumulate until the cleanup job in M10.
 
 Full roadmap: [`Requirements.md`](Requirements.md) §11.
+
+

@@ -106,6 +106,21 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: Added a UTC rule to `CreateTaskCommandValidator` rejecting any `Kind` other than `Utc`, with six validator tests covering it and the course-inheritance rule beside it. `DueDate` is the only `DateTime` reaching the API from a client; every other timestamp is written by an entity from `DateTime.UtcNow`.
 **Why**: A rule that lives only in a driver's write path surfaces as a server error instead of a rejection. The boundary that accepts a value is the boundary that must judge it — and an input shape nothing in the manual test file ever sends is an input shape nobody has verified.
 
+### A20. The implementation plan dropped a claim the requirements had already decided (M6)
+**Problem**: Caught while reviewing the M6 plan, before any file was written. `Requirements.md` §9.1 (decision 5), ADR-21 and the §11 roadmap row all state the access token carries `sub`, `jti` and `role`. The plan's step 6.2 defined `GenerateAccessToken(Guid userId, DateTime utcNow)` — no parameter the role could travel through — and step 6.3 named its proof `GenerateAccessToken_ShouldCarrySubAndJtiOnly`. Nothing would have gone red: the token would be issued, login would return 200, and the gap would surface only in the last session of M6, when a policy asked for a claim no token carried.
+**Fix**: Added `UserRole` to the signature, renamed the test to `GenerateAccessToken_ShouldCarrySubJtiAndRole`, fixed both plan steps in the same session, and fixed the claim value to the enum name rather than its number.
+**Why**: The plan decides order and proof; the requirements decide content. A plan that silently *narrows* a decided requirement is harder to catch than one that contradicts it, because every step still reads as complete on its own. Same shape as D6: found by reading a plan against its reference, not by running code.
+
+### A21. An interface defined one session before its only consumer could not serve it (M6)
+**Problem**: `ITokenService` was written in 6.2 and proven in 6.3, a full session before the login handler existed. When the handler was finally written it needed two things the contract could not give it: the refresh-token lifetime, which lives in `JwtSettings` inside Infrastructure and is invisible to Application, and a dummy BCrypt hash to compare against when no user is found. Both gaps compiled and both surfaced only while writing the consumer.
+**Fix**: `GenerateRefreshToken` now takes `utcNow` and returns a `RefreshTokenResult` carrying the raw token, its hash and its expiry; `IPasswordHasher` gained a `DummyHash` member backed by a `static readonly` hash generated at the same work factor. One test in `TokenServiceTests` changed shape; none was added or lost.
+**Why**: An interface is a guess about a caller that does not exist yet, and the guess is only checked when the caller is written. Writing the contract early is still worth it — it keeps the layers honest — but the session that first consumes it must be free to amend it, and the amendment is not a failure of the earlier session. The second gap has a rule of its own: a value whose *format* belongs to one layer must be produced by that layer. A hand-written BCrypt literal in the handler would have parsed, returned false quickly, and silently restored the timing leak that rule 3 of §9.2 exists to close.
+
+### A22. A vertical slice named after an entity hid that entity from its own layer (M6)
+**Problem**: The refresh slice was created as `Auth/Commands/RefreshToken/`, following the folder name written in Requirements §6. That declares a namespace member `RefreshToken` under `Auth.Commands`, which shadows the domain entity of the same name for **every** file under `Auth.Commands` — not only the ones inside the new folder. The logout tests, which had compiled before and were not edited, began reporting CS0118 on a `using StudyHub.Domain.Entities;` that had become inert.
+**Fix**: Renamed the slice to `Auth/Commands/Refresh/` and removed the `DomainRefreshToken` aliases that had been added as a first response. Requirements §6 was corrected in the same session.
+**Why**: The first fix — an alias in each affected file — worked and was wrong: it pays a recurring tax and leaves the cause invisible to whoever writes the next file under `Auth`. Name a slice after the operation (`Refresh`) rather than the entity it touches, and the collision cannot occur. Note also where the error appeared: in a file nobody had edited. A namespace declaration changes name resolution for its whole parent, so the failing file is not always the changed one.
+
 ---
 
 ## B. Configuration & Wiring
@@ -221,11 +236,22 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: Found during code review, while adding the `Email` value object. With a value converter in place, EF Core sees one text column and knows nothing about the object's inner property — a query filtering on `u.Email.Value` compiles cleanly and fails at runtime.
 **Fix**: Built the `Email` before the query and compared the whole object: `u.Email == normalized`.
 **Why**: A value converter maps the type, not its members. Anything a query asks of the object beyond equality has no SQL to be translated into.
+**Repeat (M5.2)**: The planned `AdminSeeder` filtered with `u.Email.Value == normalized` and re-implemented the trimming and lower-casing that `Email` already owns (A9). Caught while reviewing the plan, before the file was written. Corrected to build the `Email` first and compare the whole object.
 
 ### D7. A package version arrived through a dev-only dependency and stopped at the project boundary (M5.1)
 **Problem**: `MSB3277` — conflicting versions of `Microsoft.EntityFrameworkCore.Relational`, 10.0.4 against 10.0.11 — appeared the moment `StudyHub.Infrastructure.Tests` was added. `StudyHub.Infrastructure` itself had built cleanly for weeks. `dotnet list package --include-transitive` showed 10.0.11 inside Infrastructure and 10.0.4 inside the test project, from the same graph.
 **Fix**: Added an explicit `PackageReference` to `Microsoft.EntityFrameworkCore.Relational` in `StudyHub.Infrastructure`, without `PrivateAssets`, so it flows to consuming projects.
 **Why**: The higher version was reaching Infrastructure only through `Microsoft.EntityFrameworkCore.Design`, which carries `PrivateAssets: all` and therefore does not cross a project reference. A project that uses a package's API — `HasCheckConstraint` and `HasFilter` come from Relational — must declare it; relying on a transitive path means the version is decided by a graph whose shape changes depending on who is looking at it.
+
+### D8. An extension method was missing because of an absent assembly, not a missing `using` (M6)
+**Problem**: `.Bind(configuration.GetSection(...))` on `OptionsBuilder<JwtSettings>` failed with CS1061 in `StudyHub.Infrastructure`, although the namespace was already imported and `GetSection` and `GetConnectionString` compiled in the same file.
+**Fix**: Added `Microsoft.Extensions.Options.ConfigurationExtensions` to `StudyHub.Infrastructure`, matching the `10.0.x` family the other packages use.
+**Why**: A `using` only surfaces what the project already references. EF Core drags `Configuration.Abstractions` in transitively — which is why the neighbouring configuration calls compiled — so an absent assembly reads exactly like a forgotten import. Two identical-looking failures, two different fixes.
+
+### D9. A Fluent API call written into the plan had been removed from the provider (M6)
+**Problem**: `builder.UseXminAsConcurrencyToken()` does not exist in `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3. It was obsoleted in version 7.0 in favour of the standard `IsRowVersion()` API, then deleted. Caught before the file was written, by checking the release notes of the installed version.
+**Fix**: Configured a `uint` shadow property named `xmin`, typed `xid` and marked `IsRowVersion()`, in `RefreshTokenConfiguration`. The generated migration came out empty and `\d "RefreshTokens"` shows no added column, which is the intended result.
+**Why**: A plan ages against the packages it names, and provider-specific APIs are the first to move. Read the release notes of the *installed* version before copying a Fluent API call — a documentation page that matches the method name may describe a version you are not running.
 
 ---
 
@@ -279,6 +305,11 @@ BC.HashPassword(password, WorkFactor);
 ### F5. Four healthy source files were reported as binary by the repository export tool (M5.1)
 **Not a bug.** All four are valid UTF-8 with a BOM — first bytes `EF BB BF`, no NUL bytes anywhere — verified by reading the bytes rather than trusting the label. `[Binary file]` came from the export tool's own detection, and it spread: two files carried the label from the start, and two more acquired it immediately after being edited, while their bytes stayed correct throughout. A re-save "fix" was performed on the first two and changed nothing, because nothing was wrong. A high proportion of Arabic comments was ruled out as the trigger — `ForbiddenException.cs` is 49% non-ASCII bytes and exports fine. The real cost was a diagnosis built on a tool's verdict instead of on the file, and two documents briefly recording a defect that never existed.
 
+### F6. A key-generation command failed because the shell was an older PowerShell (M6)
+**Problem**: `[System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48)` returned `MethodNotFound` under Windows PowerShell 5.1. The next command, `dotnet user-secrets set "Jwt:Key" $key`, then reported `Missing parameter value for 'value'` — an unrelated-looking message caused entirely by the first failure leaving `$key` unassigned.
+**Fix**: Replaced the one-liner with a version-independent form — allocate a `byte[]`, fill it through `RandomNumberGenerator.Create().GetBytes($bytes)`, then Base64-encode it — and confirmed the result with `dotnet user-secrets list` instead of trusting the set command's exit.
+**Why**: Windows PowerShell 5.1 runs on .NET Framework, which exposes only the instance method; the static overload arrived with .NET 6. A .NET API is reachable from a shell only through the runtime that shell was built on, so the class name resolving proves nothing about the method. And a failed assignment does not stop the script — it hands an empty value to the next command, which then fails for a reason that hides the real one.
+
 ---
 
 ## G. Testing
@@ -299,6 +330,11 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: Applied the change for real, wiped the database (old-format hashes are not verifiable by `EnhancedVerify`), corrected D4 and D5, and moved the two behavioural proofs into the M6 checklist.
 **Why**: Every verification in use here is behavioural — a status code, a row, a green test. A change with no externally observable behaviour passes all of them unchanged. Such a change must be verified by opening the file and reading it; there is nothing else.
 
+### G5. A destructive proof poisoned the account the next session depended on (M6)
+**Problem**: Session B proved two refusal paths by corrupting a row directly on `login@test.com`: `IsActive = false`, then `PasswordHash = 'corrupt'`. The first was reverted, the second was not — `SELECT` showed `IsActive = t` beside a hash of `corrupt`. Session C reused the account, so its first request returned 401, and the two chained requests after it failed with `Unable to evaluate expression`, an error that points at the `.http` file rather than at the data.
+**Fix**: Gave session C its own account, `rotate@test.com`, and left the damaged one damaged. The revert steps stay in the session B script but are no longer load-bearing.
+**Why**: A proof that mutates shared state is a test without teardown. Reverting one of two mutations is the common case, not forgetting both: the first revert makes the cleanup feel finished. Two cheaper habits: one throwaway account per proof session, and reading the *first* red result rather than the noisiest one — the chained-request errors here were consequences, and chasing them would have cost an hour on a file that was correct.
+
 ---
 
 ## H. Leftover Scaffolding
@@ -307,6 +343,11 @@ BC.HashPassword(password, WorkFactor);
 **Items**: the `/weatherforecast` template endpoint, the `/db-check` connectivity probe, the `/ping` MediatR test (`PingQuery.cs`), and duplicate `using System;` blocks despite `ImplicitUsings` being enabled.
 **Fix**: Deleted each once it had proven what it was written to prove.
 **Why**: Temporary verification code is legitimate and useful — but it must be removed the moment it's served its purpose, or it becomes indistinguishable from real functionality.
+
+### H2. A superseded EF Core configuration was left in place beside its replacement (M5.1)
+**Problem**: Found during code review — no runtime error, no failing test. `UserConfiguration.cs` configured `User.Email` twice: the original block converting through `Email.Create`, and the block added in step 5.1.4 converting through `Email.FromPersisted`. Both compiled; the behaviour was correct only because EF Core lets the last call win.
+**Fix**: Deleted the superseded block and kept `FromPersisted`, leaving one `Property(u => u.Email)` call in the file.
+**Why**: A configuration API that overwrites silently turns leftover code into a correctness question decided by line order. Nothing in the suite guards it either — `EmailTests` exercises the value object directly and never travels through the converter, so reading the file was the only available proof (verification rule 3).
 
 ---
 
@@ -320,3 +361,5 @@ BC.HashPassword(password, WorkFactor);
 6. **A command that failed is not proof that what you were testing failed** (F3). Test a rule by trying to break it *and* by sending something that should pass — one result without the other is half an answer.
 7. **When every available design costs something real, question the requirement** (A15). The price is usually being paid for a contradiction in what was asked, not for the mechanism being built.
 8. **The dependency rule is a constraint, not a document** (B8). Application has no reference to EF Core, so a repository implementation placed there cannot compile — the architecture caught the mistake instead of merely discouraging it.
+
+

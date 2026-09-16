@@ -96,7 +96,7 @@ Entities are rich: private setters, private constructors, static factory methods
 
 | Entity | Behaviour |
 |---|---|
-| `User` | `Create`, `ConsumeTokens`, `ResetQuotaIfNeeded`, `Deactivate`, `ChangePassword`; `PromoteToAdmin`, `Can(permission)` *(M5.2)* |
+| `User` | `Create`, `ConsumeTokens`, `ResetQuotaIfNeeded`, `Deactivate`, `ChangePassword`; `PromoteToAdmin`, `Can(permission)` |
 | `Course` | `Create`, `UpdateDetails`, `MarkAsDeleted` |
 | `Item` (abstract) | `Initialize` (protected), `UpdateContent`, `MarkAsDeleted`; `IsAtMaxDepth` (read-only query, ADR-30) |
 | `Note : Item` | `Create` |
@@ -108,7 +108,7 @@ Entities are rich: private setters, private constructors, static factory methods
 
 **A rule the handler must ask about is published as a query.** When a handler has to refuse a request that the entity would also refuse, the entity exposes the rule as a read-only member — `IsAtMaxDepth`. The handler asks it and returns a precise 4xx; the mutator asks the same member and throws. The rule is written once and enforced twice. If the mutator's check ever fires, a handler skipped the question: that is a bug, and 500 is the honest answer (ADR-30).
 
-> **`Create` never produces an administrator, and there is no demotion** *(M5.2)*. The factory always sets `Role = User`; `PromoteToAdmin` is the single path to the other value, named loudly so it cannot pass unnoticed in a review, and tolerant of repetition in the same way `Deactivate` is. Demotion is deferred (§12), which means privilege has exactly one entry point and no exit — the shape that is easiest to audit. `Can(permission)` is the query form of ADR-30: a handler holding a `User` asks the entity instead of computing the answer from the role itself.
+> **`Create` never produces an administrator, and there is no demotion.** The factory always sets `Role = User`; `PromoteToAdmin` is the single path to the other value, named loudly so it cannot pass unnoticed in a review, and tolerant of repetition in the same way `Deactivate` is. Demotion is deferred (§12), which means privilege has exactly one entry point and no exit — the shape that is easiest to audit. `Can(permission)` is the query form of ADR-30: a handler holding a `User` asks the entity instead of computing the answer from the role itself.
 
 **Base classes**: `BaseEntity` holds `Id` + `CreatedAt`. `AuditableEntity : BaseEntity` adds `UpdatedAt`. `AiUsageLog` inherits the former — a usage record is never modified, so an audit field on it would be a permanently null column.
 
@@ -135,7 +135,7 @@ C# / .NET 10 with **zero external dependencies**. No EF Core, no ASP.NET Core. T
 - **EF Core 10** (Code-First) with **Npgsql**.
 - Fluent API only (`IEntityTypeConfiguration<T>`); no Data Annotations on domain entities.
 - **BCrypt.Net-Next** for password hashing, `Enhanced*` variants only.
-- **`Microsoft.IdentityModel.JsonWebTokens`** (`JsonWebTokenHandler`) for token generation *(M6, ADR-29)* — not `System.IdentityModel.Tokens.Jwt`, the previous generation of the same library.
+- **`Microsoft.IdentityModel.JsonWebTokens`** (`JsonWebTokenHandler`) for token generation (ADR-29) — not `System.IdentityModel.Tokens.Jwt`, the previous generation of the same library.
 - Implements every interface declared in Application.
 
 ### API — `StudyHub.API`
@@ -182,11 +182,11 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | **24** | **Quota is pre-checked against an estimate; usage recording never throws** | An external call that has already been paid for must never have its result discarded by an accounting rule | The hard guarantee "the counter never exceeds the quota" is lost — each request that passes the pre-check may overshoot by the gap between estimate and actual, and parallel requests all pass it before any of them records. Some requests are refused that would have fitted |
 | **25** | **`DeletedAt` + `DeletedBatchId` replace `IsDeleted` — scheduled M7** | Correct restore needs to distinguish an item deleted deliberately from one deleted by cascade. A shared batch id per delete operation answers that in one column | A migration, a query-filter change, a `MarkAsDeleted` signature change, and every test asserting `IsDeleted`. **Cheap only while no real data exists — this is why it is scheduled, not deferred indefinitely** |
 | **26** | **AI extraction is refused with 409 when the source note sits at maximum depth** | Approved tasks become children of their source note; a child of a depth-4 note is depth 5, which the entity rejects — so every suggestion would be impossible to approve. Refusing before the external call spends nothing | A user cannot extract from a deeply nested note at all. The alternative — creating the tasks as siblings — would silently break the provenance that is UC-06's entire justification |
-| **27** | **Optimistic concurrency on rotation: PostgreSQL's `xmin` is the concurrency token of `RefreshTokens`** *(M6)* | Rotation reads a row and writes it back. Without a check, two parallel refreshes with one token both succeed and fork the chain into two valid ones, and reuse detection never fires. `xmin` is maintained by PostgreSQL itself, so no column is added; it is mapped in Infrastructure as a shadow property, so no Domain type gains a persistence field | A legitimate client that refreshes twice in parallel loses one request (409) and must serialize its refreshes. No grace window (§12) |
+| **27** | **Optimistic concurrency on rotation: PostgreSQL's `xmin` is the concurrency token of `RefreshTokens`** | Rotation reads a row and writes it back. Without a check, two parallel refreshes with one token both succeed and fork the chain into two valid ones, and reuse detection never fires. `xmin` is maintained by PostgreSQL itself, so no column is added; it is mapped in Infrastructure as a shadow property, so no Domain type gains a persistence field | A legitimate client that refreshes twice in parallel loses one request (409) and must serialize its refreshes. No grace window (§12) |
 | **28** | **Extraction returns suggestions; nothing is written until the user approves** *(M8)* | AI output enters the user's tree only through a human decision. Approval needs no endpoint of its own: the client creates each approved task through `POST /api/tasks` with the note as parent. Usage is recorded at extraction time, so approving nothing still costs quota | Once created, an extracted task is indistinguishable from a hand-written one. Suggestions are not stored: a client that loses them pays again to extract again |
-| **29** | **Tokens are generated with `Microsoft.IdentityModel.JsonWebTokens`, not `System.IdentityModel.Tokens.Jwt`** *(M6)* | The latter is the previous generation of the same library, and ASP.NET Core 8+ validates bearer tokens with `JsonWebTokenHandler` by default. Writing and reading tokens with the same handler removes one source of claim-name mismatches (§9.1) | Most tutorials still show `JwtSecurityTokenHandler`; their examples need translating |
+| **29** | **Tokens are generated with `Microsoft.IdentityModel.JsonWebTokens`, not `System.IdentityModel.Tokens.Jwt`** | The latter is the previous generation of the same library, and ASP.NET Core 8+ validates bearer tokens with `JsonWebTokenHandler` by default. Writing and reading tokens with the same handler removes one source of claim-name mismatches (§9.1) | Most tutorials still show `JwtSecurityTokenHandler`; their examples need translating |
 | **30** | **A handler asks the entity before acting; the entity re-checks the same question** | The rule is written once, in the Domain, and enforced twice with two meanings. In the handler it is an expected refusal and becomes a precise 4xx; in the entity it is an invariant that protects every other caller. Ownership already follows this shape (§6) | A handler that forgets to ask returns 500 instead of 409 — the data stays safe, only the status is wrong. Every handler that nests items must ask |
-| **31** | **One `Role` column on `Users`; permissions are code — constants plus a role-to-permissions map in Domain** *(M5.2)* | Three designs were costed. Full RBAC tables (`Roles`, `Permissions`, `UserRoles`, `RolePermissions`) means four tables, seed data, two joins on every check and eventually an admin screen to edit what never changes — all to tell two roles apart. ASP.NET Core Identity brings its own `DbContext`, its own user entity and its own migrations, so the rich `User` here is either replaced or duplicated and the domain rules move into a library this project does not own. A column plus a code map costs neither. **Permissions in code live in `git` history: reviewed, diffed and tested. A permissions table editable in production is the shortest path to a silent privilege escalation** | Changing what a role may do needs a deployment, not an `UPDATE`. One user cannot hold two roles. A third role needs a migration, because `CK_User_RoleValue` fixes the range. Adding a *capability* to an existing role does not: one constant, one line in the map, one attribute on the endpoint. The Domain carries permission strings that ASP.NET Core consumes as policy names — plain `string`, no dependency, so the zero-dependency rule (§4) holds |
+| **31** | **One `Role` column on `Users`; permissions are code — constants plus a role-to-permissions map in Domain** | Three designs were costed. Full RBAC tables (`Roles`, `Permissions`, `UserRoles`, `RolePermissions`) means four tables, seed data, two joins on every check and eventually an admin screen to edit what never changes — all to tell two roles apart. ASP.NET Core Identity brings its own `DbContext`, its own user entity and its own migrations, so the rich `User` here is either replaced or duplicated and the domain rules move into a library this project does not own. A column plus a code map costs neither. **Permissions in code live in `git` history: reviewed, diffed and tested. A permissions table editable in production is the shortest path to a silent privilege escalation** | Changing what a role may do needs a deployment, not an `UPDATE`. One user cannot hold two roles. A third role needs a migration, because `CK_User_RoleValue` fixes the range. Adding a *capability* to an existing role does not: one constant, one line in the map, one attribute on the endpoint. The Domain carries permission strings that ASP.NET Core consumes as policy names — plain `string`, no dependency, so the zero-dependency rule (§4) holds |
 
 ---
 
@@ -199,17 +199,20 @@ StudyHub.Application/
 ├── Common/
 │   ├── Interfaces/   → ICourseRepository, IItemRepository, IUserRepository,
 │   │                   IUnitOfWork, IPasswordHasher, ICurrentUserService
-│   │                   IRefreshTokenRepository, ITokenService          (M6)
+│   │                   IRefreshTokenRepository, ITokenService
+│   │                   AccessToken, RefreshTokenResult — the records
+│   │                   ITokenService returns
 │   │                   IAiService                                      (M8)
 │   ├── Behaviors/    → ValidationBehavior.cs
 │   └── Exceptions/   → one file per exception type:
-│                       ConflictException.cs   — holds all three today
-│                       NotFoundException.cs, ForbiddenException.cs
-│                       InvalidCredentialsException.cs                  (M6)
+│                       ConflictException.cs, NotFoundException.cs,
+│                       ForbiddenException.cs
+│                       InvalidCredentialsException.cs
 │                       QuotaExceededException.cs,
 │                       ExternalServiceException.cs                     (M8)
 │
-├── Auth/Commands/{Login, RefreshToken, Logout}/                        (M6)
+├── Auth/Commands/{Login, Refresh}/
+├── Auth/Commands/Logout/          — handler built; endpoint in M6 session D
 ├── Auth/Queries/GetCurrentUser/                                        (M7)
 ├── Courses/Commands/{CreateCourse, DeleteCourse}/
 ├── Courses/Commands/UpdateCourse/                                      (M7)
@@ -256,7 +259,7 @@ Five tables: `Users`, `Courses`, `Items`, `RefreshTokens`, `AiUsageLogs`.
 | TokensUsedThisMonth | int | |
 | LastTokenResetDate | timestamptz | |
 | IsActive | bool | |
-| Role | int | required, database default `0`; `CK_User_RoleValue` restricts it to `0`–`1` *(M5.2)* |
+| Role | int | required, database default `0`; `CK_User_RoleValue` restricts it to `0`–`1` |
 | CreatedAt / UpdatedAt | timestamptz | UpdatedAt nullable |
 
 From M8, concurrent AI requests write `TokensUsedThisMonth`; how an increment survives that is open (§13, §14.4).
@@ -320,7 +323,7 @@ The hash must be **deterministic** (SHA-256), not BCrypt: every refresh looks th
 
 **The cascade never fires today.** Users are deactivated, never deleted. The delete behaviour is correct as an intent — a session belongs to nobody but its user — but nothing exercises it.
 
-**Concurrency token** *(M6, ADR-27)*: PostgreSQL's `xmin` system column, mapped as a shadow property. The migration creates nothing for it; a generated migration that adds an `xmin` column is wrong and must not be applied — read it first (`CODING_STANDARDS.md` §7).
+**Concurrency token** (ADR-27): PostgreSQL's `xmin` system column, mapped as a shadow property. The migration creates nothing for it; a generated migration that adds an `xmin` column is wrong and must not be applied — read it first (`CODING_STANDARDS.md` §7).
 
 ### AiUsageLogs
 | Column | Type | Notes |
@@ -344,6 +347,8 @@ Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a compo
 | Method | Route | Auth | Returns |
 |---|---|---|---|
 | POST | `/api/auth/register` | anonymous | 201 + userId |
+| POST | `/api/auth/login` | anonymous | 200 + token pair |
+| POST | `/api/auth/refresh` | anonymous | 200 + new token pair |
 | POST | `/api/courses` | user | 201 + courseId |
 | DELETE | `/api/courses/{id}` | user | 204 |
 | POST | `/api/notes` | user | 201 + noteId |
@@ -355,8 +360,6 @@ Deletion has one route for both notes and tasks, because the operation does not 
 ### Planned — M6
 | Method | Route | Auth | Returns |
 |---|---|---|---|
-| POST | `/api/auth/login` | anonymous | 200 + token pair |
-| POST | `/api/auth/refresh` | anonymous¹ | 200 + new token pair |
 | POST | `/api/auth/logout` | user | 204 |
 | PATCH | `/api/admin/users/{id}/deactivate` | administrator² | 204 |
 
@@ -397,7 +400,7 @@ All errors return RFC 9457 `ProblemDetails`:
 |---|---|
 | `ValidationException` | 400 + `errors` grouped by field |
 | — (missing or invalid access token) | 401, from the JWT middleware *(M6)* |
-| `InvalidCredentialsException` *(M6)* | 401 — login and refresh only: the credential itself was rejected |
+| `InvalidCredentialsException` | 401 — login and refresh only: the credential itself was rejected |
 | `ForbiddenException` | 403 |
 | `NotFoundException` | 404 |
 | `ConflictException` | 409 — duplicate email, parent at maximum depth, lost concurrency race |
@@ -436,7 +439,7 @@ Three of these were open questions in v2.0; the other three were never written d
 | 5 | JWT claims | **`sub`, `jti`, `role`**, plus registered claims only: `iss`, `aud`, `exp`, `iat`, `nbf` (ADR-21) | Name and email require a database read. A role change lags by up to 15 minutes, demotion included |
 | 6 | Logout scope | **The presented refresh token only** | No "sign out everywhere"; deferred (§12) |
 
-**The signing key** lives in `dotnet user-secrets`, never in `appsettings.json`. HS256 requires at least 32 bytes; a shorter key throws at *runtime*, not at build — so the key length is validated at startup *(M6)*.
+**The signing key** lives in `dotnet user-secrets`, never in `appsettings.json`. HS256 requires at least 32 bytes; a shorter key throws at *runtime*, not at build — so the key length is validated at startup.
 
 **Clock skew is set explicitly to 30 seconds** *(M6)*. `JwtBearer` tolerates five minutes by default, which silently stretches decision 1 from 15 minutes to 20.
 
@@ -457,7 +460,7 @@ Hash the incoming token → look it up → check `IsActive(utcNow)` → issue a 
 
 **Refresh refuses a deactivated user.** Without this check, deactivation would never end a session: §9.4 accepts that an access token outlives a deactivation by up to 15 minutes, which is only true if the next refresh fails.
 
-**Two parallel refreshes with one token** *(M6, ADR-27)*. A transaction makes a save atomic; it does not stop two requests from reading the token as active before either writes. The concurrency token does: exactly one rotation succeeds, the other fails at save, and `UnitOfWork` translates `DbUpdateConcurrencyException` into `ConflictException` (409), the same way it already translates a unique violation. The losing client must use the pair the winning request received; presenting the old token again is a reuse, and is treated as one.
+**Two parallel refreshes with one token** (ADR-27). A transaction makes a save atomic; it does not stop two requests from reading the token as active before either writes. The concurrency token does: exactly one rotation succeeds, the other fails at save, and `UnitOfWork` translates `DbUpdateConcurrencyException` into `ConflictException` (409), the same way it already translates a unique violation. The losing client must use the pair the winning request received; presenting the old token again is a reuse, and is treated as one.
 
 **Reuse detection**: a token that is presented after already being revoked means the chain was stolen. The response is to revoke every active token the user has, on every device. `ReplacedByTokenId` exists for exactly this. **The revocations are saved before the 401 is returned** — a handler that throws first discards them, and the stolen chain stays alive.
 
@@ -527,8 +530,8 @@ The path of an authorized request: login issues the `role` claim → `[Authorize
 | M4 | Application foundation: MediatR, FluentValidation, `ValidationBehavior`, test projects | ✅ |
 | **M5** | **Hardening & the content tree**: global exception handling, domain and security fixes, `Email` value object, base-class split, clean schema with six check constraints, the `Items` TPH restructure, create/delete handlers, controllers | ✅ |
 | **M5.1** | **Cleanup**: exception file split, `Infrastructure.Tests` with the `D4` and `D5` proofs, `Email.FromPersisted`, UTC rule, depth refused with 409 (ADR-30) | ✅ |
-| **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ⏳ Next |
-| **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | Pending |
+| **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ✅ |
+| **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ⏳ In progress — sessions A to C closed; login, refresh rotation and reuse detection are live, the `X-User-Id` bypass is not yet removed |
 | M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination, quota to configuration, **`DeletedAt` + `DeletedBatchId` migration (ADR-25)** | Pending |
 | M8 | AI integration & quota enforcement (UC-06, UC-07): suggestion endpoint with user approval (ADR-28), `ConsumeTokens` split, counter concurrency (§13), failure model, extraction depth guard | Pending |
 | M9 | Dashboard aggregation (UC-08) as defined in §15.4 | Pending |
@@ -547,7 +550,7 @@ Each of these is a decision, not an oversight.
 | **Node moving** | No use case requires it; it is the single largest source of complexity in a free-nesting tree | Cycle detection, subtree depth recalculation, `CourseId` rewrite down every descendant. Invalidates ADR-09 and ADR-10 |
 | **Restore after delete** | Not requested — but the schema change that makes it *possible* is scheduled in M7, because it is cheap only while the database is empty | Currently impossible: after a cascade delete nothing distinguishes a child deleted deliberately from one deleted by cascade. ADR-25 fixes the schema; the restore handler itself remains deferred |
 | **Absolute session lifetime cap** | Rotation with reuse detection already limits the damage of a stolen token | A `SessionStartedAt` column or a walk back up the `ReplacedByTokenId` chain, plus a forced re-login the user did not ask for |
-| **"Sign out of all devices"** | Logout is per-device (§9.1); the all-device revocation path is built anyway, for reuse detection (M6) | Roughly five lines over `GetActiveByUserAsync` (M6), plus an endpoint |
+| **"Sign out of all devices"** | Logout is per-device (§9.1); the all-device revocation path is built anyway, for reuse detection (M6) | A query for the user's active tokens — deliberately left out of `IRefreshTokenRepository` until something needs it — plus an endpoint |
 | **Refresh token cleanup** | The table only grows with sessions, and there are none yet | A background job or a scheduled `DELETE` for rows expired more than N days ago. M10 |
 | **Changing an item's `Kind`** | An object cannot change its CLR type, which is what the discriminator follows (rule 3.2.8) | Create-new-and-delete-old semantics, a new id, and the children: today they are deleted with the old item, because moving them is forbidden (rule 7) |
 | **Cursor pagination** | Offset is adequate at per-user scale (ADR-22) | A stable sort key, an opaque cursor format, and the loss of "jump to page 7" |
@@ -749,4 +752,5 @@ Overdue tasks are included, because a task that is already late is more urgent t
 **Recent courses** — at most 5, ordered by `UpdatedAt` descending, falling back to `CreatedAt`. Note what this measures: a course's `UpdatedAt` changes only when its own title or description does — adding an item under it touches nothing on the course. The list therefore means "recently created or edited", not "recently used" (§13).
 
 **The N+1 requirement is verified, not asserted.** Enable EF Core SQL logging, call the endpoint against a user with many courses and items, and count the statements. The count must be a small fixed number and must not grow with the data. "It looked fast" is not the proof.
+
 

@@ -94,7 +94,7 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Collections paginate; trees do not** *(M7)*. `page` starts at 1, `pageSize` is 20 by default and 100 at most. A subtree is returned whole, as a flat list (Requirements §14.2, ADR-23).
 
-**Never accept a user id from the request body.** Identity comes from `ICurrentUserService`. A command that carries a `UserId` field lets the client choose whose data to touch.
+**Never accept a user id — or a role — from the request body.** Identity comes from `ICurrentUserService`, and privilege comes from the `role` claim. A command that carries a `UserId` field lets the client choose whose data to touch; one that carries a `Role` field lets the client choose what they are allowed to do. Privilege changes through `User.PromoteToAdmin` only (ADR-31).
 
 **Logging** (Requirements §14.3). Never log a password, a raw refresh token or its hash, the JWT signing key, or a connection string. Log the user id, never the email. Expected exceptions log at Warning with the type name only; unexpected ones at Error with the full exception.
 
@@ -202,3 +202,4 @@ Requirements §10 records two consequences: a proof belongs to the layer where t
 **Review `git status` before staging.** `git add .` stages accidents and machine-local files indiscriminately (C4).
 
 **Verify the effect of a git command, not its exit message.** `git rm -r --cached **/bin` reports success and removes nothing in `cmd.exe`, where `**` is not expanded (C2).
+

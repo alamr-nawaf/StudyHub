@@ -29,17 +29,34 @@ dotnet user-secrets set "ConnectionStrings:DefaultConnection" \
   "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword"
 cd ..
 
-# 3. Apply the schema — see the note below about the environment variable
+# 3. Store the JWT signing key (one time only) — see the note below
+#    The app refuses to start without a key of at least 32 bytes.
+
+# 4. Apply the schema — see the note below about the environment variable
 dotnet ef database update --project StudyHub.Infrastructure --startup-project StudyHub.API
 
-# 4. Run
+# 5. Run
 dotnet run --project StudyHub.API
 
-# 5. Run the tests (no Docker needed)
+# 6. Run the tests (no Docker needed)
 dotnet test
 ```
 
-### Step 3 needs an environment variable
+### Step 3 — generating the key
+
+The key is never written to `appsettings.json`. Generate 48 random bytes and store them in user secrets; this form works in both Windows PowerShell 5.1 and PowerShell 7:
+
+```powershell
+cd StudyHub.API
+$bytes = New-Object byte[] 48
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+dotnet user-secrets set "Jwt:Key" ([Convert]::ToBase64String($bytes))
+dotnet user-secrets list
+```
+
+`Jwt:Issuer`, `Jwt:Audience` and both lifetimes live in `appsettings.json`; only the key is a secret. A key shorter than 32 bytes fails validation **at startup**, not at first login.
+
+### Step 4 needs an environment variable
 
 `dotnet ef` commands do **not** read user secrets. They go through `IDesignTimeDbContextFactory`, which reads `STUDYHUB_DB_CONNECTION`. Set it in the same terminal session:
 
@@ -112,7 +129,8 @@ Login and refresh arrive in M6; read queries and update endpoints in M7.
 |---|---|
 | `SocketException (10061)` on port 5432 | The Postgres container isn't running — `docker compose up -d` |
 | `Database connection string is not configured` at startup | User secrets not set (step 2) |
-| `STUDYHUB_DB_CONNECTION is not set` from `dotnet ef` | Environment variable missing in this terminal (step 3) |
+| `Jwt:Key must be at least 32 bytes` at startup | The signing key is missing or too short (step 3) |
+| `STUDYHUB_DB_CONNECTION is not set` from `dotnet ef` | Environment variable missing in this terminal (step 4) |
 | MediatR license warning at startup | Expected and harmless — the project is inside the free tier |
 
 Every problem hit during development, with its root cause, is recorded in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
@@ -136,7 +154,16 @@ Every problem hit during development, with its root cause, is recorded in [`docs
 
 ## Progress
 
-M1–M5.1 complete: architecture, domain, schema, error handling, the content tree with cascade soft-delete, and the M5.1 cleanup.
-**M6 (authentication) is next.**
+M1–M5.2 complete: architecture, domain, schema, error handling, the content tree with cascade soft-delete, the M5.1 cleanup, and the M5.2 role foundation — a `Role` column with a range check constraint, and a permission map in the Domain.
+
+M5.2 ships the role as data and as rules; nothing reads it yet. The `role` claim, the endpoint policies, the first administrator endpoint, and seeding the first administrator account all belong to M6, because a role only becomes provable once a request carries one.
+
+**M6 (authentication & authorization) is in progress.** Two of its five sessions are closed. Built so far: JWT settings validated at startup, `ITokenService` over `JsonWebTokenHandler`, the refresh-token repository with an `xmin` concurrency token, and `POST /api/auth/login`, which returns an access token and a refresh token and stores only the hash of the latter.
+
+Refresh rotation is live too: each refresh revokes the presented token, links it to its replacement, and issues a new pair. Presenting an already-revoked token is treated as a stolen chain — every token the user holds is revoked before the 401 comes back. Logout has a handler but no endpoint yet, because it needs an identity the API cannot read.
+
+**Nothing is protected yet.** No endpoint requires a token, the API never reads one, and the `X-User-Id` bypass above is still the only identity it has. That is the next session.
 
 Full roadmap: [`docs/Requirements.md`](docs/Requirements.md) §11.
+
+

@@ -30,6 +30,7 @@ namespace StudyHub.API.Common
                 ConflictException => (StatusCodes.Status409Conflict, "Conflict"),
                 NotFoundException => (StatusCodes.Status404NotFound, "Not found"),
                 ForbiddenException => (StatusCodes.Status403Forbidden, "Forbidden"),
+                InvalidCredentialsException => (StatusCodes.Status401Unauthorized, "Unauthorized"),
                 _ => (StatusCodes.Status500InternalServerError, "Server error")
             };
 
@@ -54,6 +55,8 @@ namespace StudyHub.API.Common
             // أخطاء الحقول تُرجَع مجمّعة باسم الحقل
             if (exception is ValidationException validationException)
             {
+                // نص الاستثناء الخام تفريغ داخلي؛ القناة الصحيحة هي errors
+                problemDetails.Detail = "One or more validation errors occurred.";
                 problemDetails.Extensions["errors"] = validationException.Errors
                     .GroupBy(e => e.PropertyName)
                     .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());

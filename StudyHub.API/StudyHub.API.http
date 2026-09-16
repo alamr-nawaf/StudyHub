@@ -1,5 +1,40 @@
 @baseUrl = http://localhost:5158
-@userId = da3b243e-8356-4c2d-8dee-e93a2af308aa
+
+### S0. مستخدم الجلسة — مرة واحدة فقط. المتوقع: 201
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Session User",
+  "email": "session@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
+### S1. دخول — شغّله أولًا في كل جلسة عمل. المتوقع: 200
+# @name s
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### S2. مستخدم ثانٍ لإثبات العزل — مرة واحدة. المتوقع: 201
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Other User",
+  "email": "other@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
+### S3. دخول المستخدم الثاني. المتوقع: 200
+# @name other
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "other@test.com", "password": "Password123" }
 
 ### 1. تسجيل صحيح - المتوقع: 201 Created
 POST {{baseUrl}}/api/auth/register
@@ -36,14 +71,14 @@ Content-Type: application/json
 ### 4. إنشاء كورس - المتوقع: 201
 POST {{baseUrl}}/api/courses
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 {
   "title": "OOP 101",
   "description": "Object oriented programming"
 }
 
-### 5. بلا ترويسة الهوية - المتوقع: 403
+### 5. بلا توكن - المتوقع: 401 (كان 403 قبل M6)
 POST {{baseUrl}}/api/courses
 Content-Type: application/json
 
@@ -54,7 +89,7 @@ Content-Type: application/json
 ### 6. عنوان فارغ - المتوقع: 400
 POST {{baseUrl}}/api/courses
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 {
   "title": ""
@@ -62,103 +97,103 @@ X-User-Id: {{userId}}
 ### 7. ملاحظة جذر - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Lecture 1 notes", "content": "Polymorphism basics" }
 
 ### 8. ملاحظة تحت كورس - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Under course", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
 
 ### 9. ملاحظة تحت ملاحظة - المتوقع: 201، والعمق 1
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Nested", "parentItemId": "f9c96308-f28b-4113-b7ae-78de07b7801c" }
 
 ### 10. أب غير موجود - المتوقع: 404
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Orphan", "parentItemId": "99999999-9999-9999-9999-999999999999" }
 
 ### 11. أب وكورس معًا - المتوقع: 400
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Both", "parentItemId": "f9c96308-f28b-4113-b7ae-78de07b7801c", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
 ### 12. مهمة جذر - المتوقع: 201
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Review chapter 3", "priority": 2 }
 
 ### 13. مهمة تحت ملاحظة - المتوقع: 201، والعمق 1
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Task under note", "parentItemId": "688a99a7-79a5-4f6e-8a30-9780256ed348" }
 
 ### 14. أولوية غير صالحة - المتوقع: 400
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Bad priority", "priority": 99 }
 ### 15. ملاحظة تحت الكورس - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Level 0", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
 
 ### 16. مهمة تحتها - المتوقع: 201
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Level 1", "parentItemId": "e40b0466-7424-48b8-b370-ee0a7fcf15c9" }
 
 ### 17. ملاحظة تحت المهمة - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Level 2", "parentItemId": "01a52370-5f9c-43c8-922e-bb208fed385a" }
 
 ### 18. حذف الوسطى (Level 1) - المتوقع: 204
 DELETE {{baseUrl}}/api/items/01a52370-5f9c-43c8-922e-bb208fed385a
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 ### 19. حذف الكورس - المتوقع: 204
 DELETE {{baseUrl}}/api/courses/d066a657-06b9-40ca-acc0-c6038305dab7
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 ### تاريخ بإزاحة — المتوقع قبل الإصلاح: 500
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Offset date", "dueDate": "2026-10-01T14:00:00+03:00" }
 
 ### تاريخ بلا إزاحة — المتوقع قبل الإصلاح: 500
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Naive date", "dueDate": "2026-10-01T14:00:00" }
 
 ### عزل: مهمة بلا تاريخ
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "No date at all" }
 
@@ -166,7 +201,7 @@ X-User-Id: {{userId}}
 # @name note0
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Depth 0" }
 
@@ -174,7 +209,7 @@ X-User-Id: {{userId}}
 # @name note1
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Depth 1", "parentItemId": "{{note0.response.body.$.noteId}}" }
 
@@ -182,7 +217,7 @@ X-User-Id: {{userId}}
 # @name note2
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Depth 2", "parentItemId": "{{note1.response.body.$.noteId}}" }
 
@@ -190,7 +225,7 @@ X-User-Id: {{userId}}
 # @name note3
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Depth 3", "parentItemId": "{{note2.response.body.$.noteId}}" }
 
@@ -198,13 +233,102 @@ X-User-Id: {{userId}}
 # @name note4
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Depth 4", "parentItemId": "{{note3.response.body.$.noteId}}" }
 
 ### D5 — السادس: المتوقَّع قبل الإصلاح 500، وبعده 409
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Depth 5 - should fail", "parentItemId": "{{note4.response.body.$.noteId}}" }
+
+### ───────── M6: المصادقة ─────────
+
+### A1. طلب محمي بلا توكن — المتوقع: 401
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+
+{ "title": "No token" }
+
+### A2. طلب محمي بترويسة الهوية القديمة وحدها — المتوقع: 401 (الثغرة مغلقة)
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+X-User-Id: da3b243e-8356-4c2d-8dee-e93a2af308aa
+
+{ "title": "Old bypass" }
+
+### A3. طلب محمي بتوكن صالح — المتوقع: 201
+# @name course
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Auth works", "description": "created with a real token" }
+
+### A4. توكن مشوَّه — المتوقع: 401
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+Authorization: Bearer not.a.real.token
+
+{ "title": "Broken token" }
+
+### A5. عزل: المستخدم الثاني يحذف كورس الأول — المتوقع: 403
+DELETE {{baseUrl}}/api/courses/{{course.response.body.$.courseId}}
+Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### A6. نقطة مجهولة ما زالت مفتوحة — المتوقع: 200
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### ───────── M6: الخروج ─────────
+
+### X1. دخول جهاز أول
+# @name deviceA
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### X2. دخول جهاز ثانٍ
+# @name deviceB
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### X3. خروج الجهاز الأول — المتوقع: 204
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{deviceA.response.body.$.accessToken}}
+
+{ "refreshToken": "{{deviceA.response.body.$.refreshToken}}" }
+
+### X4. خروج مكرّر بالتوكن نفسه — المتوقع: 204 لا 500
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{deviceA.response.body.$.accessToken}}
+
+{ "refreshToken": "{{deviceA.response.body.$.refreshToken}}" }
+
+### X5. تجديد بتوكن الجهاز الأول بعد خروجه — المتوقع: 401
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{deviceA.response.body.$.refreshToken}}" }
+
+### X6. تجديد بتوكن الجهاز الثاني — المتوقع: 401
+###     الخروج ألغى واحدًا، لكن X5 كان إعادة استخدام فألغى السلسلة كلها
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{deviceB.response.body.$.refreshToken}}" }
+
+### X7. خروج بلا توكن وصول — المتوقع: 401
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+
+{ "refreshToken": "some-token" }
