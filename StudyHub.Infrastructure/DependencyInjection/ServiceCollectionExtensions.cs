@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using StudyHub.Application.Common.Interfaces;
 using StudyHub.Infrastructure.Authentication;
 using StudyHub.Infrastructure.Data;
+using StudyHub.Infrastructure.Data.Queries;
 using StudyHub.Infrastructure.Data.Repositories;
 using StudyHub.Infrastructure.Security;
 using System.Text;
@@ -27,6 +28,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
+        // جانب القراءة منفصل عن المستودعات: المستودع يحمّل كيانات للأوامر، والاستعلام يُسقط DTO (ADR-32)
+        services.AddScoped<ICourseQueries, CourseQueries>();
         // تسجيل الـ DbContext مع محرك PostgreSQL
         services.AddDbContext<StudyHubDbContext>(options =>
             options.UseNpgsql(connectionString));
