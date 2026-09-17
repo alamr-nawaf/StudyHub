@@ -1,7 +1,6 @@
 ﻿using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Notes.Commands.CreateNote;
-using Microsoft.AspNetCore.Authorization;
 
 namespace StudyHub.API.Controllers;
 
@@ -21,8 +20,4 @@ public class NotesController : ControllerBase
         var noteId = await _mediator.Send(command, cancellationToken);
         return Created($"/api/notes/{noteId}", new { noteId });
     }
-    [Authorize]
-    [HttpGet("debug-claims")]
-    public IActionResult DebugClaims() =>
-    Ok(User.Claims.Select(c => new { c.Type, c.Value }));
 }

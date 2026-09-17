@@ -8,7 +8,7 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Application.Tests.Auth.Commands.Refresh;
 
-// يثبت ترتيب §9.3: الملغى يُطلق الإلغاء الجماعي، والمنتهي لا،
+// يثبت ترتيب §9.3: الملغى بالتدوير يُطلق الإلغاء الجماعي، والملغى بالخروج والمنتهي لا،
 // وأن الإلغاء الجماعي لا يعتمد على نجاح الحفظ
 public class RefreshTokenCommandHandlerTests
 {
@@ -99,10 +99,10 @@ public class RefreshTokenCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_RevokedToken_ShouldRevokeAllBeforeThrowing()
+    public async Task Handle_RotatedToken_ShouldRevokeAllBeforeThrowing()
     {
         var revoked = ActiveToken();
-        revoked.Revoke(DateTime.UtcNow);
+        revoked.Revoke(DateTime.UtcNow, Guid.NewGuid());
         StoredIs(revoked);
 
         var revokeAllCalled = false;
@@ -120,10 +120,27 @@ public class RefreshTokenCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_RevokedToken_WithConcurrentLegitimateRotation_ShouldStillRevokeAll()
+    public async Task Handle_LoggedOutToken_ShouldThrowWithoutRevokingAll()
+    {
+        var loggedOut = ActiveToken();
+        loggedOut.Revoke(DateTime.UtcNow);
+        StoredIs(loggedOut);
+
+        var act = () => _handler.Handle(new RefreshTokenCommand(Raw), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidCredentialsException>();
+
+        // سلسلة ميتة لا تُسرق: إلغاء جماعي هنا يجعل أي توكن قديم زرّ خروج من كل الأجهزة
+        _refreshTokens.Verify(r => r.RevokeAllForUserAsync(
+            It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+        _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_RotatedToken_WithConcurrentLegitimateRotation_ShouldStillRevokeAll()
     {
         var revoked = ActiveToken();
-        revoked.Revoke(DateTime.UtcNow);
+        revoked.Revoke(DateTime.UtcNow, Guid.NewGuid());
         StoredIs(revoked);
 
         _refreshTokens.Setup(r => r.RevokeAllForUserAsync(

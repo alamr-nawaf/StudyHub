@@ -38,13 +38,20 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, L
         if (stored is null)
             throw new InvalidCredentialsException();
 
-        // 2. ملغى = السلسلة مسروقة. الإلغاء الجماعي ينفّذ فورًا، فيُحفظ قبل الرمي.
+        // 2. ملغى بالتدوير = له خليفة، فمن يقدّمه الآن يحمل نسخة قديمة من سلسلة حيّة: سرقة.
+        //    الإلغاء الجماعي ينفّذ فورًا، فيُحفظ قبل الرمي.
         //    يسبق فحص IsActive عمدًا: الاثنان "غير نشط" ولهما ردّان مختلفان
-        if (stored.RevokedAt is not null)
+        if (stored.ReplacedByTokenId is not null)
         {
             await _refreshTokenRepository.RevokeAllForUserAsync(stored.UserId, utcNow, cancellationToken);
             throw new InvalidCredentialsException();
         }
+
+        // 2ب. ملغى بلا خليفة = خروج أو إلغاء جماعي سابق. السلسلة ميتة أصلًا، فلا شيء يُسرق منها.
+        //     لو أطلق إلغاءً جماعيًا لاستطاع حامل أي توكن قديم إخراج المستخدم من كل أجهزته متى شاء،
+        //     ولأخرج تجديدٌ متأخّر عن الخروج صاحبَه من أجهزته الأخرى
+        if (stored.RevokedAt is not null)
+            throw new InvalidCredentialsException();
 
         // 3. منتهٍ: 401 وحدها — الانتهاء ليس سرقة
         if (!stored.IsActive(utcNow))

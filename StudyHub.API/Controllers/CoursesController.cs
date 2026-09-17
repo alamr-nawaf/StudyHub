@@ -2,7 +2,6 @@
 using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Courses.Commands.CreateCourse;
 using StudyHub.Application.Courses.Commands.DeleteCourse;
-using Microsoft.AspNetCore.Authorization;
 
 namespace StudyHub.API.Controllers;
 
@@ -29,8 +28,4 @@ public class CoursesController : ControllerBase
         await _mediator.Send(new DeleteCourseCommand(id), cancellationToken);
         return NoContent();
     }
-    [Authorize]
-    [HttpGet("debug-claims")]
-    public IActionResult DebugClaims() =>
-    Ok(User.Claims.Select(c => new { c.Type, c.Value }));
 }

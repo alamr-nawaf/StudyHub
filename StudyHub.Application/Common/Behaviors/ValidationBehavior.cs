@@ -3,8 +3,10 @@ using MediatR;
 
 namespace StudyHub.Application.Common.Behaviors;
 
+// notnull لا IRequest<TResponse>: في MediatR 12+ لا يرث IRequest النوعَ IRequest<Unit>،
+// فالقيد القديم جعل الحاوية تتخطّى هذا السلوك بصمت لكل أمر بلا نتيجة
 public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
+    where TRequest : notnull
 {
     private readonly IEnumerable<IValidator<TRequest>> _validators;
 

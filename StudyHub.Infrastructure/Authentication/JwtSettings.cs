@@ -1,4 +1,5 @@
-﻿
+﻿namespace StudyHub.Infrastructure.Authentication;
+
 // إعدادات إصدار التوكن والتحقق منه في مكان واحد. المفتاح لا يُكتب في appsettings أبدًا،
 // بل في user-secrets (CODING_STANDARDS §11)، والمدّتان من المتطلبات §9.1
 public sealed class JwtSettings

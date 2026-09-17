@@ -1,7 +1,8 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Auth.Commands.Login;
+using StudyHub.Application.Auth.Commands.Logout;
 using StudyHub.Application.Auth.Commands.Refresh;
 using StudyHub.Application.Users.Commands.RegisterUser;
 
@@ -15,6 +16,7 @@ public class AuthController : ControllerBase
 
     public AuthController(IMediator mediator) => _mediator = mediator;
 
+    [AllowAnonymous]
     [HttpPost("register")]
     public async Task<IActionResult> Register(
         RegisterUserCommand command,
@@ -23,20 +25,29 @@ public class AuthController : ControllerBase
         var userId = await _mediator.Send(command, cancellationToken);
         return Created($"/api/users/{userId}", new { userId });
     }
+
+    [AllowAnonymous]
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginCommand command, CancellationToken cancellationToken)
     {
         var result = await _mediator.Send(command, cancellationToken);
         return Ok(result);
     }
+
+    // مجهول عمدًا: توكن الوصول غالبًا منتهٍ حين يُحتاج التجديد (§8، الحاشية 1)
+    [AllowAnonymous]
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh(RefreshTokenCommand command, CancellationToken cancellationToken)
     {
         var result = await _mediator.Send(command, cancellationToken);
         return Ok(result);
     }
-    [Authorize]
-    [HttpGet("debug-claims")]
-    public IActionResult DebugClaims() =>
-    Ok(User.Claims.Select(c => new { c.Type, c.Value }));
+
+    // محمي بالسياسة الافتراضية: المعالِج يقارن مالك التوكن بـ sub (§9.3)
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(LogoutCommand command, CancellationToken cancellationToken)
+    {
+        await _mediator.Send(command, cancellationToken);
+        return NoContent();
+    }
 }

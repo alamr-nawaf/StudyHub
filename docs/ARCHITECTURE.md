@@ -52,7 +52,7 @@ Domain never knows that EF Core, ASP.NET Core, or PostgreSQL exist. Application 
 
 Entities with private setters, private constructors, and static factory methods that enforce invariants at creation time.
 
-`Authorization/` holds the permission model: `Permissions` (string constants, one per capability) and `RolePermissions` (the role-to-capabilities map). Both are plain C# with no dependency, so the zero-dependency rule holds while ASP.NET Core still consumes the constants as policy names. **The map lives here, not in the API layer, so that one map has two callers** — the endpoint policy asks it from the `role` claim, and `User.Can` asks it from the entity. A map in the API layer would be invisible to Application, and a handler cannot ask a question it cannot see. The policy wiring itself arrives in M6; see Requirements §9.5 and ADR-31.
+`Authorization/` holds the permission model: `Permissions` (string constants, one per capability) and `RolePermissions` (the role-to-capabilities map). Both are plain C# with no dependency, so the zero-dependency rule holds while ASP.NET Core still consumes the constants as policy names. **The map lives here, not in the API layer, so that one map has two callers** — the endpoint policy asks it from the `role` claim, and `User.Can` asks it from the entity. A map in the API layer would be invisible to Application, and a handler cannot ask a question it cannot see. The policy wiring lives in `StudyHub.API/Authorization/`; see Requirements §9.5 and ADR-31.
 
 **Structure:**
 
@@ -137,7 +137,7 @@ SHA-256 is safe here precisely because a refresh token is high-entropy random da
 
 ### Access tokens — `Microsoft.IdentityModel.JsonWebTokens`
 
-Login issues them; nothing validates them yet. `POST /api/auth/login` verifies the password against BCrypt, checks `IsActive`, and returns a signed access token plus a refresh token whose SHA-256 hash is the only form stored. Every refusal — unknown email, wrong password, deactivated account — is the same 401 body, and `Verify` runs against a dummy hash even when no user was found, so the two cases cannot be told apart by response time.
+Login and refresh issue them; `JwtBearer` validates them on every request that is not marked anonymous. `POST /api/auth/login` verifies the password against BCrypt, checks `IsActive`, and returns a signed access token plus a refresh token whose SHA-256 hash is the only form stored. Every refusal — unknown email, wrong password, deactivated account — is the same 401 body, and `Verify` runs against a dummy hash even when no user was found, so the two cases cannot be told apart by response time.
 
 
 Tokens are written with `JsonWebTokenHandler` — the handler `JwtBearer` has used to read them since ASP.NET Core 8. `System.IdentityModel.Tokens.Jwt` is the previous generation of the same library, and writing with one handler while reading with the other is a known source of claim-name surprises (Requirements ADR-29, §9.1).
@@ -235,7 +235,7 @@ sequenceDiagram
 
 **Two conflict checks, on purpose.** The pre-check in the handler produces a friendly message. The unique index plus the `23505` translation in `UnitOfWork` is the actual protection — two simultaneous requests with the same email both pass the pre-check, and only the database can arbitrate.
 
-**Why the `23505` translation lives in Infrastructure**: `PostgresException` is an Npgsql type. Catching it in a handler would make the Application layer aware of the database engine and break the dependency rule. From M6 the same place translates `DbUpdateConcurrencyException` into `ConflictException` as well (ADR-27).
+**Why the `23505` translation lives in Infrastructure**: `PostgresException` is an Npgsql type. Catching it in a handler would make the Application layer aware of the database engine and break the dependency rule. The same place translates `DbUpdateConcurrencyException` into `ConflictException` as well (ADR-27).
 
 ### 4.3 Creating a nested item — the richest flow
 
@@ -327,7 +327,7 @@ graph TD
     G --> F["ForbiddenException → 403"]
     G --> N["NotFoundException → 404"]
     G --> C["ConflictException → 409<br/>duplicate, full parent, lost race"]
-    G --> I["InvalidCredentialsException → 401<br/>login and refresh only (M6)"]
+    G --> I["InvalidCredentialsException → 401<br/>login and refresh only"]
     G --> Q["QuotaExceededException → 429 (M8)"]
     G --> X["ExternalServiceException → 502 (M8)"]
     G --> S["anything else → 500<br/>no internal detail leaked"]
@@ -335,7 +335,7 @@ graph TD
 
 Every response is RFC 9457 `ProblemDetails`. Expected exceptions are logged as warnings; unexpected ones as errors with the full stack.
 
-**The other 401 never reaches this handler** *(M6)*. `JwtBearer` rejects a missing or invalid access token before MediatR runs.
+**The other 401, and the permission 403, never reach this handler.** The authorization middleware rejects a missing or invalid access token (401), or a valid one whose role lacks the endpoint's permission (403), before MediatR runs. Both responses have an empty body.
 
 **400 is shape; 403, 404 and 409 are state.** Validators throw the first; handlers throw the rest. A handler never throws `ValidationException` (Requirements §8).
 
@@ -436,27 +436,21 @@ An **integer** discriminator, not the default string: renaming a C# class later 
 
 ---
 
-## 6. Identity — Current State and Target
+## 6. Identity & Authorization
 
-### ⚠ Authentication is not implemented
+### Protected by default
 
-`CurrentUserService` reads an `X-User-Id` request header. **This is a complete authentication bypass**: anyone can name any user and become them. It exists only so the content handlers could be built and verified before M6.
+A fallback authorization policy requires an authenticated caller on **every** endpoint. Only `register`, `login`, `refresh`, and the OpenAPI document opt out, with `[AllowAnonymous]`. A new controller that forgets an attribute is therefore closed, not open.
 
-**This code must not be deployed or exposed on any network until M6 is complete.**
-
-### Why the shim is safe to have built on
-
-The Application layer depends on `ICurrentUserService`, never on HTTP. When JWT arrives, only the API-layer implementation changes:
+Identity is the `sub` claim of the validated token. `CurrentUserService` reads it and nothing else, and the Application layer still depends only on `ICurrentUserService` — replacing the pre-M6 `X-User-Id` header changed no line outside the API project:
 
 ```
-today:  header    → CurrentUserService → ICurrentUserService → handlers
-M6:     JWT claim → CurrentUserService → ICurrentUserService → handlers
-                                          ↑ unchanged
+before M6:  header    → CurrentUserService → ICurrentUserService → handlers
+now:        JWT claim → CurrentUserService → ICurrentUserService → handlers
+                                              ↑ unchanged
 ```
 
-Not one line in Application, Domain, or Infrastructure moves. Every handler and every handler test written today survives.
-
-### The M6 target, in one flow
+### The flow
 
 ```mermaid
 sequenceDiagram
@@ -467,13 +461,22 @@ sequenceDiagram
     API->>DB: store the SHA-256 of the refresh token
     API-->>Client: 200 { accessToken (15 min), refreshToken (7 days) }
     Client->>API: any request + Bearer accessToken
-    Note over API: JwtBearer validates before MediatR — no valid token, 401
+    Note over API: no valid token → 401, before MediatR
+    Client->>API: PATCH /api/admin/users/{id}/deactivate
+    Note over API: policy reads the role claim, asks RolePermissions → 403 if absent
     Client->>API: POST /api/auth/refresh { refreshToken }
     API->>DB: revoke the old token (xmin-checked) + insert the new, one save
     API-->>Client: 200 { new pair }
+    Client->>API: POST /api/auth/logout { refreshToken }
+    API->>DB: revoke it, if it is the caller's and still active
+    API-->>Client: 204, always
 ```
 
-The decisions and their costs live in Requirements §9 and ADR-19 to ADR-21, ADR-27, ADR-29. Two traps are written down there before they happen: the claim name the user id arrives under, and `JwtBearer`'s five-minute default clock skew.
+**Permissions are policies named after `Permissions` constants.** `PermissionPolicies` registers one per constant by reflection; `PermissionAuthorizationHandler` parses the `role` claim by exact name and asks `RolePermissions` — the same map `User.Can` asks. No permission list exists in the API layer.
+
+**The first administrator is seeded from `AdminSeed:*` in user-secrets** at startup, through `SeedAdministratorCommand`: an existing account is promoted and its password left alone; a missing one is created under the registration password policy and promoted in the same save.
+
+The decisions and their costs live in Requirements §9 and ADR-19 to ADR-21, ADR-27, ADR-29, ADR-31.
 
 ### Ownership enforcement today
 
@@ -524,6 +527,13 @@ cd ..
 #      [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 #      dotnet user-secrets set "Jwt:Key" ([Convert]::ToBase64String($bytes))
 
+# 3b. Optional — seed the first administrator on the next start (Requirements §9.4)
+#      dotnet user-secrets set "AdminSeed:Email" "admin@example.com"
+#      dotnet user-secrets set "AdminSeed:FullName" "Administrator"
+#      dotnet user-secrets set "AdminSeed:Password" "<meets the registration policy>"
+#    Once the startup log says the administrator was created:
+#      dotnet user-secrets remove "AdminSeed:Password"
+
 # 4. Set the environment variable for design-time commands (per terminal session)
 #    PowerShell:  $env:STUDYHUB_DB_CONNECTION = "Host=localhost;..."
 #    cmd.exe:     set "STUDYHUB_DB_CONNECTION=Host=localhost;..."
@@ -551,7 +561,7 @@ The design-time factory has **no fallback value** — it throws with a clear mes
 
 ### Manual endpoint testing
 
-Open `StudyHub.API/StudyHub.API.http` in Visual Studio or VS Code with the REST Client extension. Register a user, copy the returned id into the `@userId` variable, and the content requests will work.
+Open `StudyHub.API/StudyHub.API.http` in Visual Studio or VS Code with the REST Client extension. Send `S0` once to register the session user, then `S1` at the start of every session to log in; the later requests read the access token from `S1`'s response.
 
 ### Inspecting the database directly
 
@@ -570,7 +580,8 @@ Paste one statement per line — a multi-line paste can merge with the previous 
 Documented on purpose. A learning project is more useful when its gaps are visible.
 
 ### Security
-- **No authentication.** The `X-User-Id` header is a full bypass (§6). Closed by M6, the next milestone.
+- **An access token outlives a deactivation, a logout, or a role change** by up to 15 minutes — the price of stateless auth (Requirements §9.4).
+- **The administrator seed password sits in user-secrets** until the operator removes it after the first start (Requirements §9.4).
 - **Registration reveals whether an email is in use** — an accepted risk that also undermines login's anti-enumeration rules (Requirements §9.4).
 - **Course ownership is guarded in one layer only** (§6).
 
@@ -590,7 +601,7 @@ Documented on purpose. A learning project is more useful when its gaps are visib
 - **No integration tests.** Infrastructure and API are covered by manual verification only. M10.
 - **The API is not containerized.** Only Postgres runs in Docker.
 - **No rate limiting.** M10.
-- **Refresh tokens are never deleted** *(from M6)* — expired and revoked rows accumulate until the cleanup job in M10.
+- **Refresh tokens are never deleted** — expired and revoked rows accumulate until the cleanup job in M10.
 
 Full roadmap: [`Requirements.md`](Requirements.md) §11.
 

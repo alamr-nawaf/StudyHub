@@ -121,6 +121,11 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: Renamed the slice to `Auth/Commands/Refresh/` and removed the `DomainRefreshToken` aliases that had been added as a first response. Requirements §6 was corrected in the same session.
 **Why**: The first fix — an alias in each affected file — worked and was wrong: it pays a recurring tax and leaves the cause invisible to whoever writes the next file under `Auth`. Name a slice after the operation (`Refresh`) rather than the entity it touches, and the collision cannot occur. Note also where the error appeared: in a file nobody had edited. A namespace declaration changes name resolution for its whole parent, so the failing file is not always the changed one.
 
+### A23. Any revoked refresh token could sign its owner out of every device (M6)
+**Problem**: Found during code review — no runtime error. Reuse detection fired on `RevokedAt is not null`, so a token ended by *logout* counted as stolen. Anyone holding an old logged-out token could revoke all of a user's sessions at will, and a refresh still in flight when the user tapped logout signed them out of their other devices.
+**Fix**: `RefreshTokenCommandHandler` now runs reuse detection only when `ReplacedByTokenId` is set — revoked by rotation. A token revoked without a successor gets a plain 401. The handler tests were split into rotated and logged-out cases; Requirements §9.3 was updated.
+**Why**: A security response that anyone can trigger is an attack surface of its own. The signal was "an old copy of a *live* chain"; the field that tells a live chain from a dead one already existed and was not consulted.
+
 ---
 
 ## B. Configuration & Wiring
@@ -164,6 +169,11 @@ A record of every technical problem hit during development, how it was fixed, an
 **Problem**: `ItemRepository.cs` was placed in `StudyHub.Application/Common/Interfaces/` beside its interface. It failed to compile: `Microsoft.EntityFrameworkCore` does not exist in that project, and neither does `StudyHubDbContext`.
 **Fix**: Deleted it and recreated it under `StudyHub.Infrastructure/Data/Repositories/`, leaving only `IItemRepository` in Application.
 **Why**: The dependency rule made the mistake impossible to commit — Application has no reference to EF Core, so the compiler rejected the file the moment it landed in the wrong project. Interfaces are declared where they are needed; implementations live where their dependencies are permitted.
+
+### B9. Authentication was wired but no content endpoint required it (M6)
+**Problem**: Found during code review. `JwtBearer` validated tokens, yet only the `debug-claims` actions carried `[Authorize]`. A request with no token, a malformed token, or the old `X-User-Id` header reached the handler anonymously and failed in `CurrentUserService` as **403**, not 401 — and `DELETE /api/courses/{id}` answered 404 or 403 depending on whether the id existed.
+**Fix**: A `FallbackPolicy` requiring an authenticated user in `Program.cs`, with `[AllowAnonymous]` on register, login, refresh, and `MapOpenApi()`. Verified over HTTP: all three cases return 401.
+**Why**: Authentication identifies the caller; only authorization *refuses* one. Registering the scheme protects nothing on its own. Make protection the default and exposure the declaration, so a forgotten attribute fails closed.
 
 ---
 
@@ -252,6 +262,11 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: `builder.UseXminAsConcurrencyToken()` does not exist in `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3. It was obsoleted in version 7.0 in favour of the standard `IsRowVersion()` API, then deleted. Caught before the file was written, by checking the release notes of the installed version.
 **Fix**: Configured a `uint` shadow property named `xmin`, typed `xid` and marked `IsRowVersion()`, in `RefreshTokenConfiguration`. The generated migration came out empty and `\d "RefreshTokens"` shows no added column, which is the intended result.
 **Why**: A plan ages against the packages it names, and provider-specific APIs are the first to move. Read the release notes of the *installed* version before copying a Fluent API call — a documentation page that matches the method name may describe a version you are not running.
+
+### D10. The validation pipeline silently skipped every command without a result (M6)
+**Problem**: Found during code review. `ValidationBehavior` was constrained `where TRequest : IRequest<TResponse>`. In MediatR 12+, `IRequest` inherits only `IBaseRequest`, not `IRequest<Unit>`, so the container skipped the behaviour for `LogoutCommand`, `DeleteCourseCommand`, and `DeleteItemCommand`. `LogoutCommandValidator` never ran; `{"refreshToken": null}` would have reached `HashRefreshToken` as a 500.
+**Fix**: Constraint changed to `where TRequest : notnull`. `ValidationBehaviorTests` sends an invalid `LogoutCommand` through a real service provider — it failed before the fix and passes after.
+**Why**: Microsoft's container treats an open generic whose constraint does not match as "not registered", without an error. Handler tests call the handler directly and cannot see the pipeline, so a wiring rule needs a test that goes through the container.
 
 ---
 
@@ -348,6 +363,11 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: Found during code review — no runtime error, no failing test. `UserConfiguration.cs` configured `User.Email` twice: the original block converting through `Email.Create`, and the block added in step 5.1.4 converting through `Email.FromPersisted`. Both compiled; the behaviour was correct only because EF Core lets the last call win.
 **Fix**: Deleted the superseded block and kept `FromPersisted`, leaving one `Property(u => u.Email)` call in the file.
 **Why**: A configuration API that overwrites silently turns leftover code into a correctness question decided by line order. Nothing in the suite guards it either — `EmailTests` exercises the value object directly and never travels through the converter, so reading the file was the only available proof (verification rule 3).
+
+### H3. A one-time claims check was copied into every controller (M6)
+**Problem**: Found during code review. `GET debug-claims`, written once to read the real claim names (Requirements §9.1), existed in all five controllers after the claim name was settled — five routes that returned a caller's token contents back to them.
+**Fix**: Removed from `AuthController`, `CoursesController`, `ItemsController`, `NotesController`, and `TasksController`, with their now-unused `using` lines.
+**Why**: A diagnostic that answered its question is dead code. Scaffolding copied instead of placed once multiplies the cleanup — and each copy is one more surface nobody remembers is there.
 
 ---
 

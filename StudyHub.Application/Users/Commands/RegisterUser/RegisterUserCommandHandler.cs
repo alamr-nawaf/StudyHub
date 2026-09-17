@@ -7,7 +7,8 @@ namespace StudyHub.Application.Users.Commands.RegisterUser;
 
 public class RegisterUserCommandHandler : IRequestHandler<RegisterUserCommand, Guid>
 {
-    private const int DefaultMonthlyTokenQuota = 100_000; // يُنقل إلى الإعدادات في M7
+    // internal: بذر المسؤول يُنشئ حسابًا بالحصة نفسها. يُنقل إلى الإعدادات في M7
+    internal const int DefaultMonthlyTokenQuota = 100_000;
 
     private readonly IUserRepository _userRepository;
     private readonly IPasswordHasher _passwordHasher;

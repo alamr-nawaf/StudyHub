@@ -320,8 +320,9 @@ Content-Type: application/json
 
 { "refreshToken": "{{deviceA.response.body.$.refreshToken}}" }
 
-### X6. تجديد بتوكن الجهاز الثاني — المتوقع: 401
-###     الخروج ألغى واحدًا، لكن X5 كان إعادة استخدام فألغى السلسلة كلها
+### X6. تجديد بتوكن الجهاز الثاني — المتوقع: 200
+###     توكن X5 أُلغي بالخروج لا بالتدوير، فلا كشف إعادة استخدام ولا إلغاء جماعي (A23)
+# @name rotated
 POST {{baseUrl}}/api/auth/refresh
 Content-Type: application/json
 
@@ -332,3 +333,66 @@ POST {{baseUrl}}/api/auth/logout
 Content-Type: application/json
 
 { "refreshToken": "some-token" }
+
+### X8. خروج بتوكن تجديد null — المتوقع: 400 لا 500 (المدقّق يعمل الآن، D10)
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "refreshToken": null }
+
+### X9. إعادة توكن الجهاز الثاني الذي دوّره X6 — المتوقع: 401، وإلغاء كل جلسات المستخدم
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{deviceB.response.body.$.refreshToken}}" }
+
+### X10. التوكن الخلف الذي أصدره X6 — المتوقع: 401 (ألغاه كشف السرقة في X9)
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{rotated.response.body.$.refreshToken}}" }
+
+### ───────── M6: الإدارة (UC-09) ─────────
+###  يحتاج مسؤولًا مبذورًا من AdminSeed:* في user-secrets (README، الخطوة 3b).
+###  ضع بياناته هنا مرة واحدة
+@adminEmail = admin@example.com
+@adminPassword = CHANGE-ME
+
+### ADM0. دخول المسؤول — المتوقع: 200
+# @name admin
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### ADM0b. معرّف المستخدم الثاني — من psql:
+###   SELECT "Id" FROM "Users" WHERE "Email" = 'other@test.com';
+@otherUserId = 00000000-0000-0000-0000-000000000000
+
+### ADM1. بلا توكن — المتوقع: 401
+PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+
+### ADM2. مستخدم عادي — المتوقع: 403
+PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### ADM3. مسؤول — المتوقع: 204، وpsql يُظهر IsActive = false
+PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+Authorization: Bearer {{admin.response.body.$.accessToken}}
+
+### ADM4. تكرار — المتوقع: 204 (Deactivate متسامحة)
+PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+Authorization: Bearer {{admin.response.body.$.accessToken}}
+
+### ADM5. معرّف غير موجود — المتوقع: 404
+PATCH {{baseUrl}}/api/admin/users/3f2b8c1e-9a4d-4e6b-8c7a-1d2e3f4a5b6c/deactivate
+Authorization: Bearer {{admin.response.body.$.accessToken}}
+
+### ADM6. المعطَّل يحاول الدخول — المتوقع: 401
+###       تحذير: هذا يعطّل other@test.com نهائيًا، وA5 يعتمد عليه (G5). للإعادة من psql:
+###       UPDATE "Users" SET "IsActive" = true WHERE "Email" = 'other@test.com';
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "other@test.com", "password": "Password123" }

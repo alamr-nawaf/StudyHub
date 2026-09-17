@@ -15,7 +15,7 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Interfaces are declared where they are needed; implementations live where their dependencies are permitted.** `IItemRepository` belongs in `Application/Common/Interfaces`; `ItemRepository` belongs in `Infrastructure/Data/Repositories`. Putting an implementation in Application does not compile, because that project cannot see `DbContext` (B8).
 
-**Database-engine types stay in Infrastructure.** `PostgresException` and anything else from Npgsql must never appear in Application. Translating a database error into an Application exception happens in `UnitOfWork`, not in a handler: a unique violation (`23505`) today, and a concurrency conflict (`DbUpdateConcurrencyException`) from M6 — both become `ConflictException`.
+**Database-engine types stay in Infrastructure.** `PostgresException` and anything else from Npgsql must never appear in Application. Translating a database error into an Application exception happens in `UnitOfWork`, not in a handler: a unique violation (`23505`) and a concurrency conflict (`DbUpdateConcurrencyException`) — both become `ConflictException`.
 
 ---
 
@@ -68,7 +68,7 @@ Rules for writing code in this repository. Where a rule exists because something
 
 ## 5. API & Error Handling
 
-**RESTful compliance**: standard verbs and status codes — 200 OK, 201 Created, 204 No Content, 400, 401 *(M6)*, 403, 404, 409, and 429 and 502 *(M8)*.
+**RESTful compliance**: standard verbs and status codes — 200 OK, 201 Created, 204 No Content, 400, 401, 403, 404, 409, and 429 and 502 *(M8)*.
 
 **Controllers are thin.** An action builds a command, sends it through MediatR, and maps the result. Three to five lines, always. No business logic, and no skipping a layer to reach Infrastructure directly.
 
@@ -77,8 +77,9 @@ Rules for writing code in this repository. Where a rule exists because something
 | Exception | Status |
 |---|---|
 | `ValidationException` | 400, with errors grouped by field name |
-| — (missing or invalid access token) | 401, from the JWT middleware *(M6)* |
-| `InvalidCredentialsException` *(M6)* | 401 — thrown by the login and refresh handlers only |
+| — (missing or invalid access token) | 401, from the authorization middleware |
+| — (valid token, permission missing) | 403, from the authorization middleware |
+| `InvalidCredentialsException` | 401 — thrown by the login and refresh handlers only |
 | `ForbiddenException` | 403 |
 | `NotFoundException` | 404 |
 | `ConflictException` | 409 — duplicate email, parent at maximum depth, lost concurrency race |
@@ -94,6 +95,8 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Collections paginate; trees do not** *(M7)*. `page` starts at 1, `pageSize` is 20 by default and 100 at most. A subtree is returned whole, as a flat list (Requirements §14.2, ADR-23).
 
+**Endpoints are protected by default.** A fallback policy requires an authenticated caller everywhere, so an endpoint never needs a bare `[Authorize]`. An anonymous endpoint is a deliberate declaration — `[AllowAnonymous]` — and a privileged one names its permission: `[Authorize(Policy = Permissions.X)]`. Adding a capability is a constant in `Permissions`, a line in `RolePermissions`, and that attribute; the policy registers itself (Requirements §9.5, B9).
+
 **Never accept a user id — or a role — from the request body.** Identity comes from `ICurrentUserService`, and privilege comes from the `role` claim. A command that carries a `UserId` field lets the client choose whose data to touch; one that carries a `Role` field lets the client choose what they are allowed to do. Privilege changes through `User.PromoteToAdmin` only (ADR-31).
 
 **Logging** (Requirements §14.3). Never log a password, a raw refresh token or its hash, the JWT signing key, or a connection string. Log the user id, never the email. Expected exceptions log at Warning with the type name only; unexpected ones at Error with the full exception.
@@ -106,7 +109,9 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **One handler class = one use case.** No shared logic between handlers beyond what lives in Domain or a repository.
 
-**Validators live in the same feature folder** as their command — never centralized in one file.
+**Validators live in the same feature folder** as their command — never centralized in one file. A rule two validators must share identically (the password policy) is an extension method in `Common/Validation/`, not a copy.
+
+**An open-generic pipeline behaviour constrains `where TRequest : notnull`**, never `IRequest<TResponse>`. Since MediatR 12, a command without a result is not an `IRequest<Unit>`, and the container silently skips a behaviour whose constraint does not match — the build, the handler tests, and the endpoint all stay green while the validator never runs (D10).
 
 **The slice follows the use case, not the table.** `CreateNoteCommand` belongs under `Notes/`, even though it writes to the `Items` table through `IItemRepository`.
 
@@ -197,7 +202,7 @@ Requirements §10 records two consequences: a proof belongs to the layer where t
 
 **Commit messages**: Conventional Commits — `feat(domain): add item tree`, `fix(api): map ForbiddenException to 403`.
 
-**Never commit a secret, and never leave a fallback that contains one.** Connection strings — and, from M6, the JWT signing key — live in `dotnet user-secrets` for the running app; the connection string also lives in `STUDYHUB_DB_CONNECTION` for design-time commands. A hardcoded default is how a password ends up permanently in git history (B2, B4).
+**Never commit a secret, and never leave a fallback that contains one.** Connection strings, the JWT signing key, and the administrator seed (`AdminSeed:*`) live in `dotnet user-secrets` for the running app; the connection string also lives in `STUDYHUB_DB_CONNECTION` for design-time commands. A hardcoded default is how a password ends up permanently in git history (B2, B4).
 
 **Review `git status` before staging.** `git add .` stages accidents and machine-local files indiscriminately (C4).
 

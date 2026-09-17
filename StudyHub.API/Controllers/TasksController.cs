@@ -1,7 +1,6 @@
 ﻿using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Tasks.Commands.CreateTask;
-using Microsoft.AspNetCore.Authorization;
 
 namespace StudyHub.API.Controllers;
 
@@ -21,8 +20,4 @@ public class TasksController : ControllerBase
         var taskId = await _mediator.Send(command, cancellationToken);
         return Created($"/api/tasks/{taskId}", new { taskId });
     }
-    [Authorize]
-    [HttpGet("debug-claims")]
-    public IActionResult DebugClaims() =>
-    Ok(User.Claims.Select(c => new { c.Type, c.Value }));
 }

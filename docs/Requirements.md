@@ -30,7 +30,7 @@ This is a **personal learning project**. The explicit goal is to practise profes
 ### Identity & Access Management
 - **UC-01**: As a user, I can register and log in securely so that my data is protected.
 - **UC-02**: As a user, my session stays active through refresh tokens without frequent manual logins, and a stolen token can be revoked.
-- **UC-09**: As an administrator, I can deactivate a user's account, so that an abusive or compromised account can be stopped without deleting anything the person wrote *(M6)*.
+- **UC-09**: As an administrator, I can deactivate a user's account, so that an abusive or compromised account can be stopped without deleting anything the person wrote.
 
 > **UC-09 is numbered 09, not 03.** Numbers are never reused and never shifted: every other document, test name, and log entry that already points at UC-03 through UC-08 would otherwise point at the wrong thing. The same reasoning gave M5.1 a decimal instead of a whole number (§11).
 
@@ -142,7 +142,7 @@ C# / .NET 10 with **zero external dependencies**. No EF Core, no ASP.NET Core. T
 - ASP.NET Core **Controllers** (ADR-14). Every action is 3–5 lines: build a command, send it, map the result.
 - `IExceptionHandler` + `ProblemDetails` for centralized error translation (ADR-15).
 - **OpenAPI** via `AddOpenApi()`.
-- **`Microsoft.AspNetCore.Authentication.JwtBearer`** (M6).
+- **`Microsoft.AspNetCore.Authentication.JwtBearer`**.
 
 ### Database
 PostgreSQL 15 in Docker Compose. Schema versioned through EF Core Migrations. Referential integrity enforced at the database level, not only in code.
@@ -204,6 +204,8 @@ StudyHub.Application/
 │   │                   ITokenService returns
 │   │                   IAiService                                      (M8)
 │   ├── Behaviors/    → ValidationBehavior.cs
+│   ├── Validation/   → PasswordRuleExtensions.cs — the password policy,
+│   │                   shared by registration and administrator seeding
 │   └── Exceptions/   → one file per exception type:
 │                       ConflictException.cs, NotFoundException.cs,
 │                       ForbiddenException.cs
@@ -211,8 +213,7 @@ StudyHub.Application/
 │                       QuotaExceededException.cs,
 │                       ExternalServiceException.cs                     (M8)
 │
-├── Auth/Commands/{Login, Refresh}/
-├── Auth/Commands/Logout/          — handler built; endpoint in M6 session D
+├── Auth/Commands/{Login, Refresh, Logout}/
 ├── Auth/Queries/GetCurrentUser/                                        (M7)
 ├── Courses/Commands/{CreateCourse, DeleteCourse}/
 ├── Courses/Commands/UpdateCourse/                                      (M7)
@@ -225,7 +226,7 @@ StudyHub.Application/
 ├── Items/Commands/UpdateItemContent/                                   (M7)
 ├── Items/Queries/{GetItem, GetItemTree, GetRootItems}/                 (M7)
 ├── Dashboard/Queries/GetDashboard/                                     (M9)
-└── Users/Commands/RegisterUser/
+└── Users/Commands/{RegisterUser, DeactivateUser, SeedAdministrator}/
 ```
 
 **One exception type per file.** Three types sharing one file compiles and runs, but the file name then describes only one of its contents, and the comments inside end up naming files that do not exist.
@@ -348,20 +349,18 @@ Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a compo
 |---|---|---|---|
 | POST | `/api/auth/register` | anonymous | 201 + userId |
 | POST | `/api/auth/login` | anonymous | 200 + token pair |
-| POST | `/api/auth/refresh` | anonymous | 200 + new token pair |
+| POST | `/api/auth/refresh` | anonymous¹ | 200 + new token pair |
+| POST | `/api/auth/logout` | user | 204, in every case (§9.3) |
 | POST | `/api/courses` | user | 201 + courseId |
 | DELETE | `/api/courses/{id}` | user | 204 |
 | POST | `/api/notes` | user | 201 + noteId |
 | POST | `/api/tasks` | user | 201 + taskId |
 | DELETE | `/api/items/{id}` | user | 204 |
+| PATCH | `/api/admin/users/{id}/deactivate` | `users:deactivate` permission² | 204 |
 
 Deletion has one route for both notes and tasks, because the operation does not distinguish them.
 
-### Planned — M6
-| Method | Route | Auth | Returns |
-|---|---|---|---|
-| POST | `/api/auth/logout` | user | 204 |
-| PATCH | `/api/admin/users/{id}/deactivate` | administrator² | 204 |
+**"user" means any valid access token, and it is the default.** A fallback authorization policy requires an authenticated caller on every endpoint; only the three `anonymous` routes above, and the OpenAPI document, opt out with `[AllowAnonymous]` (§9).
 
 ² UC-09. The first endpoint guarded by a permission rather than by ownership, and the proof that the whole authorization path works end to end: a normal user's token gets 403, an administrator's gets 204, and `psql` shows `IsActive = false`. Deactivating an already-inactive account is still 204 — `User.Deactivate` is tolerant of repetition, and an administrator should not have to check first. There is deliberately no *reactivate* and no *list users* endpoint yet (§12).
 
@@ -399,7 +398,8 @@ All errors return RFC 9457 `ProblemDetails`:
 | Exception | Status |
 |---|---|
 | `ValidationException` | 400 + `errors` grouped by field |
-| — (missing or invalid access token) | 401, from the JWT middleware *(M6)* |
+| — (missing or invalid access token) | 401, from the authorization middleware, empty body |
+| — (valid token, permission missing) | 403, from the authorization middleware, empty body |
 | `InvalidCredentialsException` | 401 — login and refresh only: the credential itself was rejected |
 | `ForbiddenException` | 403 |
 | `NotFoundException` | 404 |
@@ -418,13 +418,13 @@ All errors return RFC 9457 `ProblemDetails`:
 
 ## 9. Security Model
 
-### ⚠ Current state — authentication is not implemented
+### Current state
 
-Identity comes from an `X-User-Id` request header read by a temporary `CurrentUserService`. **This is a complete authentication bypass**: anyone can name any user and become them. It exists solely so the content handlers could be built and tested before M6.
+Identity comes from the `sub` claim of an access token that `JwtBearer` has already validated; `CurrentUserService` reads that claim and nothing else. The `X-User-Id` header that stood in for authentication until M6 is gone.
 
-**This code must not be deployed or exposed on any network until M6 is complete.**
+**Every endpoint requires a valid access token unless it opts out.** A fallback authorization policy requires an authenticated user; `register`, `login`, `refresh`, and the OpenAPI document carry `[AllowAnonymous]`. Protection is the default and exposure is the declaration — a new controller that forgets an attribute is closed, not open. Without the fallback, an anonymous request reached the handler and failed there as a 403, and the 404-versus-403 difference told a stranger which ids exist. **Cost**: the 401 has an empty body rather than `ProblemDetails`, and an anonymous request to a route that does not exist gets 401 instead of 404.
 
-The design limits the blast radius of replacing it: the Application layer depends on `ICurrentUserService`, not on HTTP. When JWT arrives, only the API-layer implementation changes — not one line in Application.
+Replacing the header touched no line in Application: handlers still ask `ICurrentUserService`, and only its API-layer implementation changed.
 
 ### 9.1 Authentication decisions (new in v3.0)
 
@@ -441,7 +441,7 @@ Three of these were open questions in v2.0; the other three were never written d
 
 **The signing key** lives in `dotnet user-secrets`, never in `appsettings.json`. HS256 requires at least 32 bytes; a shorter key throws at *runtime*, not at build — so the key length is validated at startup.
 
-**Clock skew is set explicitly to 30 seconds** *(M6)*. `JwtBearer` tolerates five minutes by default, which silently stretches decision 1 from 15 minutes to 20.
+**Clock skew is set explicitly to 30 seconds**. `JwtBearer` tolerates five minutes by default, which silently stretches decision 1 from 15 minutes to 20.
 
 **A trap worth writing down before it happens.** `CurrentUserService` will read the user id from the `ClaimsPrincipal`. Whether it appears as `sub` or as `ClaimTypes.NameIdentifier` depends on which handler validated the token and whether inbound claim mapping was cleared. Both spellings compile, and the wrong one returns `null` at runtime, not an error. **Verify by enumerating the actual claims once and reading them** — this is verification rule 3 (§10) applied before the fact rather than after it.
 
@@ -456,13 +456,15 @@ Three of these were open questions in v2.0; the other three were never written d
 
 Hash the incoming token → look it up → check `IsActive(utcNow)` → issue a new pair → `oldToken.Revoke(utcNow, newToken.Id)` → save. **One `SaveChangesAsync` is already one transaction in EF Core; no explicit transaction is needed and none should be added.**
 
-**Every refusal is 401 through `InvalidCredentialsException`, with one text** — an unknown token, an expired one, a revoked one, or a deactivated user. **Inactive has two causes, with two responses**: a revoked token triggers reuse detection (below); an expired one returns 401 and nothing else — expiry is not theft.
+**Every refusal is 401 through `InvalidCredentialsException`, with one text** — an unknown token, an expired one, a revoked one, or a deactivated user. **Inactive has two causes, with two responses**: a token revoked by rotation triggers reuse detection (below); an expired one returns 401 and nothing else — expiry is not theft.
 
 **Refresh refuses a deactivated user.** Without this check, deactivation would never end a session: §9.4 accepts that an access token outlives a deactivation by up to 15 minutes, which is only true if the next refresh fails.
 
 **Two parallel refreshes with one token** (ADR-27). A transaction makes a save atomic; it does not stop two requests from reading the token as active before either writes. The concurrency token does: exactly one rotation succeeds, the other fails at save, and `UnitOfWork` translates `DbUpdateConcurrencyException` into `ConflictException` (409), the same way it already translates a unique violation. The losing client must use the pair the winning request received; presenting the old token again is a reuse, and is treated as one.
 
-**Reuse detection**: a token that is presented after already being revoked means the chain was stolen. The response is to revoke every active token the user has, on every device. `ReplacedByTokenId` exists for exactly this. **The revocations are saved before the 401 is returned** — a handler that throws first discards them, and the stolen chain stays alive.
+**Reuse detection**: a token that is presented after being revoked **by rotation** — `ReplacedByTokenId` is set — means an old copy of a live chain is in someone else's hands: the chain was stolen. The response is to revoke every active token the user has, on every device. `ReplacedByTokenId` exists for exactly this. **The revocations are saved before the 401 is returned** — a handler that throws first discards them, and the stolen chain stays alive.
+
+**A token revoked without a successor is a plain 401, not a theft.** That is a token ended by logout, or by an earlier mass revocation. Its chain is already dead, so there is nothing left to steal from it. Treating it as theft would have two costs: anyone holding any old token could log the user out of every device, as often as they like, and a refresh still in flight when the user taps logout would sign that user out of their other devices. **Cost**: a stolen token whose owner has since logged out no longer raises the alarm — acceptable, because it can no longer open a session either.
 
 **Logout** revokes the presented refresh token only if it belongs to the caller (`sub`) and is still active, and returns 204 in every case — a foreign, unknown, or already-revoked token included, as RFC 7009 does for token revocation. Logout never runs reuse detection: a revoked token arriving there is a double tap, not a theft.
 
@@ -472,9 +474,10 @@ Hash the incoming token → look it up → check `IsActive(utcNow)` → issue a 
 - **An access token outlives a deactivation, a logout, or a role change** by up to its lifetime. This is the price of stateless auth (ADR-06). Checking the database on every request would remove the reason JWT was chosen. **Demotion is the worst case of the three**: a user who has just lost administrative rights keeps them until their access token expires.
 - **Course ownership is guarded in one layer only** (see §6).
 - **Password length is unbounded.** Safe because `EnhancedHashPassword` pre-hashes the input, removing BCrypt's 72-byte truncation. Reverting to the standard variant would silently reintroduce it.
-- **The first administrator is created by hand** *(until M6)*. There is no seeding path yet, so the account is promoted with a direct `UPDATE` — which bypasses `PromoteToAdmin` and therefore leaves `UpdatedAt` unstamped. Acceptable for a single operation on a single row; it stops being acceptable the moment a second environment exists (§12).
+- **The first administrator comes from configuration, and its password sits in `user-secrets` until someone removes it.** At startup, `AdminSeed:Email` names the account. If none exists, `AdminSeed:FullName` and `AdminSeed:Password` create it under the registration password policy, and `PromoteToAdmin` runs in the same save. An existing account is only promoted — its password is never overwritten, so stale configuration cannot reset a password its owner has since changed. The startup log asks for the password to be removed once it has served. Without `AdminSeed:Email` nothing runs, and startup does not touch the database. **Cost**: until it is removed, an administrator password lives in plain text on the machine — the same exposure as the JWT key and the connection string beside it. This replaced the direct `UPDATE` used before M6, which bypassed `PromoteToAdmin` and left `UpdatedAt` unstamped.
+- **An administrator can deactivate any account, their own and the last administrator's included.** Nothing stops it, and there is no reactivation (§12). Recovery is to name a different, active account in `AdminSeed:Email` and restart. A guard would need a count of active administrators on every call — a rule for a situation that has one operator today.
 
-### 9.5 Authorization model *(the role lands in M5.2, the wiring in M6)*
+### 9.5 Authorization model
 
 Two mechanisms, and they are not interchangeable:
 
@@ -482,6 +485,8 @@ Two mechanisms, and they are not interchangeable:
 - **Permission** guards what a role may do to *other people's* rows. An ASP.NET Core policy checks it on the endpoint, before the handler runs.
 
 The path of an authorized request: login issues the `role` claim → `[Authorize(Policy = ...)]` names a permission on the endpoint → the policy parses the claim back into `UserRole` and asks the same Domain map that the entity asks. **One map, two callers**, so the API layer keeps no list of its own that could drift. That is the reason the map lives in Domain and not in the API layer: a map in the API is invisible to Application, and a handler cannot ask a question it cannot see.
+
+**Policies are registered from the constants, not from a list.** At startup, one policy is added for every `const` in `Permissions`, named by the permission itself and found by reflection. Adding a capability therefore stays at the three edits ADR-31 promises — a constant, a line in the map, an attribute — with no fourth place to forget; and a forgotten policy would not fail safe, it would throw on the first request. The `role` claim is accepted by its exact enum name only: `Enum.TryParse` also accepts `"1"` and `"admin"`, which the token never carries.
 
 **A normal user holds no permission at all** — their rights over their own rows come from ownership, not from the role, so the `User` entry in the map is an empty set rather than an oversight. A role value the code does not recognize resolves to that same empty set instead of throwing: a row written by a future version must mean *no privilege*, never a crashed request. This is the `D4` shape — an unrecognized value out of storage is refused, not fatal.
 
@@ -531,7 +536,7 @@ The path of an authorized request: login issues the `role` claim → `[Authorize
 | **M5** | **Hardening & the content tree**: global exception handling, domain and security fixes, `Email` value object, base-class split, clean schema with six check constraints, the `Items` TPH restructure, create/delete handlers, controllers | ✅ |
 | **M5.1** | **Cleanup**: exception file split, `Infrastructure.Tests` with the `D4` and `D5` proofs, `Email.FromPersisted`, UTC rule, depth refused with 409 (ADR-30) | ✅ |
 | **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ✅ |
-| **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ⏳ In progress — sessions A to C closed; login, refresh rotation and reuse detection are live, the `X-User-Id` bypass is not yet removed |
+| **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ✅ |
 | M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination, quota to configuration, **`DeletedAt` + `DeletedBatchId` migration (ADR-25)** | Pending |
 | M8 | AI integration & quota enforcement (UC-06, UC-07): suggestion endpoint with user approval (ADR-28), `ConsumeTokens` split, counter concurrency (§13), failure model, extraction depth guard | Pending |
 | M9 | Dashboard aggregation (UC-08) as defined in §15.4 | Pending |
@@ -567,7 +572,7 @@ Each of these is a decision, not an oversight.
 | **Editing permissions at runtime** | The shortest path to a silent privilege escalation (ADR-31) | Not planned to return |
 | **An audit trail of administrative actions** | There is exactly one administrative action, and it leaves its own trace: `IsActive = false` with a stamped `UpdatedAt` | A table, an interceptor or an explicit write per action, and a retention rule. Add it with the first *destructive* administrative action, not before |
 | **Listing users for an administrator** | UC-09 needs a user id, and `psql` supplies it. An endpoint built before its consumer is the A16 pattern | A read query, a DTO, pagination, a `users:view` permission, and the decision of which fields an administrator may see |
-| **Seeding the first administrator from configuration** | Scheduled in M6, not deferred: the code is only provable once an endpoint checks the role, and it puts a real password in configuration, which is worth doing once and doing carefully | Until then the first administrator is promoted by hand (§9.4) |
+| **Reactivating a deactivated account** | UC-09 asks only to stop an account; `User` has no `Activate` | A domain method, its tests, a second permission, and an endpoint. Until then a mistaken deactivation is undone with a direct `UPDATE` |
 | **`Content` length limit** | It is the note body; an arbitrary cap would be guesswork | A migration if a limit is ever chosen |
 
 ---

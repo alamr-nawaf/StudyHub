@@ -1,7 +1,6 @@
 ﻿using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Items.Commands.DeleteItem;
-using Microsoft.AspNetCore.Authorization;
 
 namespace StudyHub.API.Controllers;
 
@@ -20,8 +19,4 @@ public class ItemsController : ControllerBase
         await _mediator.Send(new DeleteItemCommand(id), cancellationToken);
         return NoContent();
     }
-    [Authorize]
-    [HttpGet("debug-claims")]
-    public IActionResult DebugClaims() =>
-    Ok(User.Claims.Select(c => new { c.Type, c.Value }));
 }

@@ -23,6 +23,14 @@ namespace StudyHub.API.Common
             Exception exception,
             CancellationToken cancellationToken)
         {
+            // العميل قطع الاتصال: لا أحد سيقرأ الرد، وليس عطلًا يستحق سجل خطأ كامل
+            if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
+            {
+                _logger.LogInformation("Request aborted by the client.");
+                httpContext.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+                return true;
+            }
+
             // ترجمة نوع الاستثناء إلى رمز HTTP
             var (statusCode, title) = exception switch
             {

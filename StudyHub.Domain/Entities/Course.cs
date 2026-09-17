@@ -13,6 +13,9 @@ public sealed class Course : AuditableEntity
 
     public static Course Create(Guid userId, string title, string? description = null)
     {
+        if (userId == Guid.Empty)
+            throw new ArgumentException("UserId cannot be empty.");
+
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("Course title cannot be empty.");
 
@@ -36,6 +39,9 @@ public sealed class Course : AuditableEntity
     }
     public void MarkAsDeleted()
     {
+        // متسامحة مثل Item.MarkAsDeleted: لا يُعاد ختم UpdatedAt لحذف قديم
+        if (IsDeleted) return;
+
         IsDeleted = true;
         UpdatedAt = DateTime.UtcNow;
     }

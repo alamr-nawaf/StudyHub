@@ -20,5 +20,8 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     public Task RevokeAllForUserAsync(Guid userId, DateTime utcNow, CancellationToken cancellationToken) =>
         _context.RefreshTokens
             .Where(t => t.UserId == userId && t.RevokedAt == null)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, utcNow), cancellationToken);
+            // ExecuteUpdate يتجاوز الكيان، فيُختم UpdatedAt يدويًا كما يفعل RefreshToken.Revoke
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.RevokedAt, utcNow)
+                .SetProperty(t => t.UpdatedAt, utcNow), cancellationToken);
 }
