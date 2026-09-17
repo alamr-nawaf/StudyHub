@@ -205,10 +205,14 @@ StudyHub.Application/
 │   │                   IRefreshTokenRepository, ITokenService
 │   │                   AccessToken, RefreshTokenResult — the records
 │   │                   ITokenService returns
+│   │                   ICourseQueries, IItemQueries, IUserQueries —
+│   │                   the read side, returning DTOs (ADR-32)
 │   │                   IAiService                                      (M8)
 │   ├── Behaviors/    → ValidationBehavior.cs
+│   ├── Pagination/   → PagedResult.cs, Paging.cs (§14.2)
 │   ├── Validation/   → PasswordRuleExtensions.cs — the password policy,
 │   │                   shared by registration and administrator seeding
+│   │                   PagingRuleExtensions.cs, UtcDateRuleExtensions.cs
 │   └── Exceptions/   → one file per exception type:
 │                       ConflictException.cs, NotFoundException.cs,
 │                       ForbiddenException.cs
@@ -217,18 +221,16 @@ StudyHub.Application/
 │                       ExternalServiceException.cs                     (M8)
 │
 ├── Auth/Commands/{Login, Refresh, Logout}/
-├── Auth/Queries/GetCurrentUser/                                        (M7)
-├── Courses/Commands/{CreateCourse, DeleteCourse}/
-├── Courses/Commands/UpdateCourse/                                      (M7)
-├── Courses/Queries/GetCourses/                                         (M7)
-├── Courses/Queries/GetCourseTree/                                      (M7)
+├── Auth/Queries/GetCurrentUser/
+├── Courses/                → CourseDto.cs, CourseMappings.cs
+├── Courses/Commands/{CreateCourse, DeleteCourse, UpdateCourse}/
+├── Courses/Queries/{GetCourses, GetCourseTree}/
 ├── Notes/Commands/CreateNote/
 ├── Notes/Commands/ExtractTaskSuggestions/                              (M8)
-├── Tasks/Commands/CreateTask/
-├── Tasks/Commands/{UpdateTaskStatus, UpdateTaskSchedule}/              (M7)
-├── Items/Commands/DeleteItem/
-├── Items/Commands/UpdateItemContent/                                   (M7)
-├── Items/Queries/{GetItem, GetItemTree, GetRootItems}/                 (M7)
+├── Tasks/Commands/{CreateTask, UpdateTaskStatus, UpdateTaskSchedule}/
+├── Items/                  → ItemDto.cs, ItemMappings.cs
+├── Items/Commands/{DeleteItem, UpdateItemContent}/
+├── Items/Queries/{GetItem, GetItemTree, GetRootItems}/
 ├── Dashboard/Queries/GetDashboard/                                     (M9)
 └── Users/Commands/{RegisterUser, DeactivateUser, SeedAdministrator}/
 ```
@@ -243,7 +245,7 @@ StudyHub.Application/
 
 **Defence in depth is deliberate.** Ownership of a parent item is checked twice — once in the handler (to return a precise 403) and once inside `Item.Initialize` (because the entity trusts no caller). Depth follows the same shape: the handler asks `parent.IsAtMaxDepth` and returns 409, and `Item.Initialize` asks the same member (ADR-30). Course ownership is checked in the handler only, since the entity receives a `Guid` rather than an object; that asymmetry is known and accepted.
 
-**Commands and queries have different fetch rules** *(M7)*. A query projects directly into its DTO with `Select` and never materializes an entity. A command loads the whole entity, because it is about to call a method on it. Since repositories do not expose `IQueryable` (ADR-13), the projection has to run inside Infrastructure, in a read-side query interface (ADR-32).
+**Commands and queries have different fetch rules**. A query projects directly into its DTO with `Select` and never materializes an entity. A command loads the whole entity, because it is about to call a method on it. Since repositories do not expose `IQueryable` (ADR-13), the projection has to run inside Infrastructure, in a read-side query interface (ADR-32).
 
 ---
 
@@ -355,14 +357,28 @@ Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a compo
 | POST | `/api/auth/login` | anonymous | 200 + token pair |
 | POST | `/api/auth/refresh` | anonymous¹ | 200 + new token pair |
 | POST | `/api/auth/logout` | user | 204, in every case (§9.3) |
+| GET | `/api/auth/me` | user | 200 + `CurrentUserDto`; 404 if the account row is gone |
 | POST | `/api/courses` | user | 201 + courseId |
+| GET | `/api/courses?page&pageSize` | user | 200 + `PagedResult<CourseDto>`, the caller's courses only; 400 for paging out of range (§14.2) |
+| GET | `/api/courses/{id}/tree` | user | 200 + flat list of `ItemDto` (ADR-23); 404, 403 (ADR-33) |
+| PUT | `/api/courses/{id}` | user | 204; 400, 404, 403 |
 | DELETE | `/api/courses/{id}` | user | 204 |
 | POST | `/api/notes` | user | 201 + noteId |
 | POST | `/api/tasks` | user | 201 + taskId |
+| PATCH | `/api/tasks/{id}/status` | user | 204; 400, 404 (also for a note's id), 403 |
+| PATCH | `/api/tasks/{id}/schedule` | user | 204; 400 (including a non-UTC `dueDate`, §14.1), 404 (also for a note's id), 403 |
+| GET | `/api/items?page&pageSize` | user | 200 + `PagedResult<ItemDto>` of standalone items (no parent, no course); 400 for paging out of range |
+| GET | `/api/items/{id}` | user | 200 + `ItemDto`; 404, 403 (ADR-33) |
+| GET | `/api/items/{id}/tree` | user | 200 + flat list of `ItemDto`, the item first (ADR-23); 404, 403 |
+| PATCH | `/api/items/{id}` | user | 204; 400, 404, 403. Never changes `Kind` (rule 3.2.8) |
 | DELETE | `/api/items/{id}` | user | 204 |
 | PATCH | `/api/admin/users/{id}/deactivate` | `users:deactivate` permission² | 204 |
 
-Deletion has one route for both notes and tasks, because the operation does not distinguish them.
+Deletion, reading and content edits have one route for both notes and tasks, because those operations do not distinguish them. Status and schedule live under `/api/tasks`, because only a task has them.
+
+**Every update body replaces all of its fields.** A `null` `description`, `content` or `dueDate` clears the value. The id always comes from the route; an `id` in the body is ignored.
+
+**Enum values are numbers in JSON**, in both directions: `kind` (0 = note, 1 = task), `status`, `priority` and `role`. For a note, `status`, `priority` and `dueDate` are `null`.
 
 **"user" means any valid access token, and it is the default.** A fallback authorization policy requires an authenticated caller on every endpoint; only the three `anonymous` routes above, and the OpenAPI document, opt out with `[AllowAnonymous]` (§9).
 
@@ -381,10 +397,7 @@ Deletion has one route for both notes and tasks, because the operation does not 
 }
 ```
 
-`expiresIn` is the access token's remaining lifetime in **seconds**, so the client never has to parse the JWT to schedule a refresh. No user profile fields are included (ADR-21); a client needing them calls `GET /api/auth/me` *(M7)*.
-
-### Planned — M7
-`GET /api/auth/me`, `GET /api/courses`, `GET /api/courses/{id}/tree`, `GET /api/items`, `GET /api/items/{id}`, `GET /api/items/{id}/tree`, `PATCH /api/items/{id}`, `PATCH /api/tasks/{id}/status`, `PATCH /api/tasks/{id}/schedule`, `PUT /api/courses/{id}`
+`expiresIn` is the access token's remaining lifetime in **seconds**, so the client never has to parse the JWT to schedule a refresh. No user profile fields are included (ADR-21); a client needing them calls `GET /api/auth/me`.
 
 ### Planned — M8
 | Method | Route | Auth | Returns |
@@ -541,7 +554,7 @@ The path of an authorized request: login issues the `role` claim → `[Authorize
 | **M5.1** | **Cleanup**: exception file split, `Infrastructure.Tests` with the `D4` and `D5` proofs, `Email.FromPersisted`, UTC rule, depth refused with 409 (ADR-30) | ✅ |
 | **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ✅ |
 | **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ✅ |
-| M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | Pending |
+| M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | In progress |
 | M8 | AI integration & quota enforcement (UC-06, UC-07): suggestion endpoint with user approval (ADR-28), `ConsumeTokens` split, counter concurrency (§13), failure model, extraction depth guard, quota to configuration | Pending |
 | M9 | Dashboard aggregation (UC-08) as defined in §15.4 | Pending |
 | M10 | Integration tests, rate limiting, refresh-token cleanup, API containerization | Pending |

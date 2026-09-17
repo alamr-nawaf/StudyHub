@@ -135,14 +135,24 @@ Dependencies point inward only: `API → Infrastructure → Application → Doma
 | POST | `/api/auth/login` | anonymous | 200 + access and refresh tokens |
 | POST | `/api/auth/refresh` | anonymous | 200 + a new token pair; the old refresh token is revoked |
 | POST | `/api/auth/logout` | user | 204 — revokes the presented refresh token |
+| GET | `/api/auth/me` | user | 200 + the caller's profile and AI quota |
 | POST | `/api/courses` | user | 201 + courseId |
+| GET | `/api/courses?page=1&pageSize=20` | user | 200 + a page of the caller's courses |
+| GET | `/api/courses/{id}/tree` | user | 200 + every note and task of the course, as a flat list |
+| PUT | `/api/courses/{id}` | user | 204 — replaces title and description |
 | DELETE | `/api/courses/{id}` | user | 204 — soft-deletes the course and its whole tree; not reversible through the API |
 | POST | `/api/notes` | user | 201 + noteId |
 | POST | `/api/tasks` | user | 201 + taskId |
+| PATCH | `/api/tasks/{id}/status` | user | 204 — sets the status |
+| PATCH | `/api/tasks/{id}/schedule` | user | 204 — replaces priority and due date (UTC only) |
+| GET | `/api/items?page=1&pageSize=20` | user | 200 + a page of standalone notes and tasks (no parent, no course) |
+| GET | `/api/items/{id}` | user | 200 + one note or task |
+| GET | `/api/items/{id}/tree` | user | 200 + the item and all its descendants, as a flat list |
+| PATCH | `/api/items/{id}` | user | 204 — replaces title and content |
 | DELETE | `/api/items/{id}` | user | 204 — soft-deletes the item and its whole subtree; not reversible through the API |
 | PATCH | `/api/admin/users/{id}/deactivate` | administrator | 204 — the account can no longer log in or refresh |
 
-"user" means any valid access token (`Authorization: Bearer ...`); without one the response is 401. Read queries and update endpoints arrive in M7.
+"user" means any valid access token (`Authorization: Bearer ...`); without one the response is 401. Another user's course or item returns 403, for reads and writes alike. Lists take `page` (from 1) and `pageSize` (20 by default, at most 100); a value out of range is 400. A null `description`, `content` or `dueDate` in an update body clears the value.
 
 ---
 
@@ -183,7 +193,9 @@ M1–M6 complete: architecture, domain, schema, error handling, the content tree
 
 M6 delivered login with JWT access tokens and hashed refresh tokens; refresh rotation with an `xmin` concurrency token and reuse detection (replaying a rotated token revokes every session the user has); logout; endpoints protected by default; permission policies driven by the Domain's role map; the first administrator endpoint; and seeding the first administrator from configuration. The `X-User-Id` bypass is gone.
 
-**Next: M7** — DTOs, read queries, update handlers, pagination, and the `DeletedAt` + `DeletedBatchId` migration.
+M7 (in progress, awaiting review) adds DTOs, read queries for courses, items, trees and the current user, update endpoints for courses, items and tasks, and pagination.
+
+**Next: M8** — AI task suggestions with user approval, the quota split, and the quota moved to configuration.
 
 Full roadmap: [`docs/Requirements.md`](docs/Requirements.md) §11.
 

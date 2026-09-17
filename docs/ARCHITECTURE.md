@@ -586,10 +586,7 @@ Documented on purpose. A learning project is more useful when its gaps are visib
 - **Course ownership is guarded in one layer only** (§6).
 
 ### Functionality
-- **No read queries at all.** Content can be created and deleted, but only inspected through `psql`.
-- **No update handlers.** `UpdateStatus`, `UpdateContent`, `UpdateSchedule`, and `UpdateDetails` exist on the entities with nothing calling them — behaviour that is written but unreachable.
-- **No DTOs.** Controllers return anonymous objects. `CODING_STANDARDS.md` §5 requires DTOs; needed before the first read query, since returning `Item` directly would leak every field.
-- **`DefaultMonthlyTokenQuota` is a constant** in `RegisterUserCommandHandler` rather than configuration.
+- **`DefaultMonthlyTokenQuota` is a constant** in `RegisterUserCommandHandler` rather than configuration. It moves to configuration in M8.
 
 ### Design limits
 - **Node moving is not supported.** Three other decisions — stored depth, inherited `CourseId`, and the absence of cycle detection — are safe *only* because of this. Adding moving invalidates all three at once.

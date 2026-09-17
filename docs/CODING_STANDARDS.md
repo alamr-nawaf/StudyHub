@@ -93,9 +93,9 @@ Every class, record and interface starts with a short English `/// <summary>` th
 
 **Registering a handler is not wiring it.** `AddExceptionHandler<T>()` makes it available; `app.UseExceptionHandler()` makes it run. The same applies to authentication: pipeline order is `UseExceptionHandler → UseAuthentication → UseAuthorization → MapControllers`, and every wrong order still builds and starts (B1, B5).
 
-**DTOs**: never return a domain entity from an endpoint. Map to a DTO through a static extension method (`item.ToDto()`).
+**DTOs**: never return a domain entity from an endpoint. Map to a DTO through a static extension method on `IQueryable` (`items.ToDto()`, ADR-17), so the mapping becomes the `SELECT` list and no entity is materialized.
 
-**Collections paginate; trees do not** *(M7)*. `page` starts at 1, `pageSize` is 20 by default and 100 at most. A subtree is returned whole, as a flat list (Requirements §14.2, ADR-23).
+**Collections paginate; trees do not**. `page` starts at 1, `pageSize` is 20 by default and 100 at most. A subtree is returned whole, as a flat list (Requirements §14.2, ADR-23).
 
 **Endpoints are protected by default.** A fallback policy requires an authenticated caller everywhere, so an endpoint never needs a bare `[Authorize]`. An anonymous endpoint is a deliberate declaration — `[AllowAnonymous]` — and a privileged one names its permission: `[Authorize(Policy = Permissions.X)]`. Adding a capability is a constant in `Permissions`, a line in `RolePermissions`, and that attribute; the policy registers itself (Requirements §9.5, B9).
 
@@ -119,7 +119,7 @@ Every class, record and interface starts with a short English `/// <summary>` th
 
 **A handler assumes its input is already valid.** Validation ran in the pipeline. Handlers check *state* (does the parent exist, is it owned, does it have room) — never *shape*.
 
-**Queries project; commands load** *(M7)*. A query projects into its DTO with `Select` and never materializes an entity; a command loads the entity it is about to call. The projection lives in a read-side query interface implemented in Infrastructure (Requirements ADR-32).
+**Queries project; commands load**. A query projects into its DTO with `Select` and never materializes an entity; a command loads the entity it is about to call. The projection lives in a read-side query interface implemented in Infrastructure (Requirements ADR-32).
 
 ---
 
