@@ -325,6 +325,11 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: Replaced the one-liner with a version-independent form — allocate a `byte[]`, fill it through `RandomNumberGenerator.Create().GetBytes($bytes)`, then Base64-encode it — and confirmed the result with `dotnet user-secrets list` instead of trusting the set command's exit.
 **Why**: Windows PowerShell 5.1 runs on .NET Framework, which exposes only the instance method; the static overload arrived with .NET 6. A .NET API is reachable from a shell only through the runtime that shell was built on, so the class name resolving proves nothing about the method. And a failed assignment does not stop the script — it hands an empty value to the next command, which then fails for a reason that hides the real one.
 
+### F7. The build failed because an API instance from an earlier session was still running (M7)
+**Problem**: The first `dotnet build` of M7 failed with `MSB3021: Unable to copy file ... StudyHub.Infrastructure.dll ... being used by another process`, while `dotnet test` in the same run passed with 105 tests. The process holding the file was a `StudyHub.API` started the day before and never stopped; it also held port 5158.
+**Fix**: Found the owner with `Get-NetTCPConnection -LocalPort 5158` and `Get-Process`, stopped it, rebuilt clean. The M7 manual run then started its own instance and stopped it afterwards.
+**Why**: On Windows a running process locks its own DLLs, so only the project whose output it runs fails to build; the test projects build into other folders and stay green. A green `dotnet test` next to a red build is therefore a sign of a locked file, not of broken code. A server started for a manual check belongs to that check and should be stopped when it ends.
+
 ---
 
 ## G. Testing

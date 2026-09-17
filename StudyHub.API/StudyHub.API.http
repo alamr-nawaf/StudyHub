@@ -396,3 +396,108 @@ POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
 { "email": "other@test.com", "password": "Password123" }
+
+### ───────── M7: القراءة والتعديل ─────────
+###  كلها بتوكن S1. السلسلة: كورس ← ملاحظة تحته ← مهمة تحت الملاحظة، ثم قراءة وتعديل
+
+### M7-1. إنشاء كورس — المتوقع: 201
+# @name m7course
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 course", "description": "read and update" }
+
+### M7-2. ملاحظة تحت الكورس — المتوقع: 201
+# @name m7note
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 note", "courseId": "{{m7course.response.body.$.courseId}}" }
+
+### M7-3. مهمة تحت الملاحظة — المتوقع: 201
+# @name m7task
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 task", "parentItemId": "{{m7note.response.body.$.noteId}}" }
+
+### M7-4. المستخدم الحالي — المتوقع: 200
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-5. قائمة الكورسات — المتوقع: 200 و items و totalCount
+GET {{baseUrl}}/api/courses?page=1&pageSize=20
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-6. حجم صفحة فوق الحد — المتوقع: 400 لا قصّ صامت
+GET {{baseUrl}}/api/courses?page=1&pageSize=101
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-7. شجرة الكورس — المتوقع: 200 وعنصران مرتّبان بالعمق
+GET {{baseUrl}}/api/courses/{{m7course.response.body.$.courseId}}/tree
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-8. العناصر المستقلة — المتوقع: 200 (ما تحت كورس لا يظهر هنا)
+GET {{baseUrl}}/api/items?page=1&pageSize=20
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-9. عنصر واحد — المتوقع: 200 و kind = 1 و status = 0
+GET {{baseUrl}}/api/items/{{m7task.response.body.$.taskId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-10. شجرة الملاحظة — المتوقع: 200 والملاحظة ثم المهمة
+GET {{baseUrl}}/api/items/{{m7note.response.body.$.noteId}}/tree
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-11. تعديل الكورس — المتوقع: 204، والوصف null يُمسح
+PUT {{baseUrl}}/api/courses/{{m7course.response.body.$.courseId}}
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 course (renamed)", "description": null }
+
+### M7-12. تعديل محتوى الملاحظة — المتوقع: 204
+PATCH {{baseUrl}}/api/items/{{m7note.response.body.$.noteId}}
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 note (edited)", "content": "now with a body" }
+
+### M7-13. حالة المهمة — المتوقع: 204
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/status
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "status": 2 }
+
+### M7-14. جدول المهمة — المتوقع: 204
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/schedule
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "priority": 2, "dueDate": "2026-10-01T14:00:00Z" }
+
+### M7-15. تاريخ بإزاحة — المتوقع: 400 (§14.1)
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/schedule
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "priority": 2, "dueDate": "2026-10-01T14:00:00+03:00" }
+
+### M7-16. حالة على معرّف ملاحظة — المتوقع: 404
+PATCH {{baseUrl}}/api/tasks/{{m7note.response.body.$.noteId}}/status
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "status": 1 }
+
+### M7-17. قراءة الشجرة بعد التعديل — المتوقع: 200 والقيم الجديدة
+GET {{baseUrl}}/api/courses/{{m7course.response.body.$.courseId}}/tree
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-18. عزل: المستخدم الثاني يقرأ عنصر الأول — المتوقع: 403 (ADR-33)
+GET {{baseUrl}}/api/items/{{m7task.response.body.$.taskId}}
+Authorization: Bearer {{other.response.body.$.accessToken}}
