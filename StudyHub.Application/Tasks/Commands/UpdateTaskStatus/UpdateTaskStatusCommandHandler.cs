@@ -33,7 +33,8 @@ public class UpdateTaskStatusCommandHandler : IRequestHandler<UpdateTaskStatusCo
         if (task.UserId != _currentUser.UserId)
             throw new ForbiddenException("You do not own this task.");
 
-        task.UpdateStatus(request.Status);
+        // ! لأن المدقّق رفض null قبل الوصول هنا (المعالِج يفترض مدخلاته صحيحة)
+        task.UpdateStatus(request.Status!.Value);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }

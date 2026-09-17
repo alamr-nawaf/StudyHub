@@ -10,7 +10,12 @@ public class UpdateTaskScheduleCommandValidator : AbstractValidator<UpdateTaskSc
 {
     public UpdateTaskScheduleCommandValidator()
     {
-        RuleFor(x => x.Priority).IsInEnum();
+        // NotNull قبل IsInEnum: الحقل الغائب يُرفض بـ 400 بدل أن يصير Low بصمت
+        RuleFor(x => x.Priority)
+            .Cascade(CascadeMode.Stop)
+            .NotNull()
+            .IsInEnum();
+
         RuleFor(x => x.DueDate).UtcOrNull();
     }
 }

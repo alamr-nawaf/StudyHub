@@ -4,13 +4,34 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Application.Tests.Tasks.Commands.UpdateTaskSchedule;
 
-// قاعدة UTC لها فرع null، فتحتاج إثباتًا لكل فرع: حذفها لا يكسر بناءً ولا اختبار معالِج
+// قاعدة UTC لها فرع null، فتحتاج إثباتًا لكل فرع: حذفها لا يكسر بناءً ولا اختبار معالِج.
+// وnull في Priority يعني حقلًا غائبًا لا قيمة مقصودة، بعكس null في DueDate
 public class UpdateTaskScheduleCommandValidatorTests
 {
     private readonly UpdateTaskScheduleCommandValidator _validator = new();
 
     private static UpdateTaskScheduleCommand Command(DateTime? dueDate) =>
         new(Guid.NewGuid(), TaskPriority.Medium, dueDate);
+
+    [Fact]
+    public void Validate_PriorityMissing_ShouldFail()
+    {
+        var command = new UpdateTaskScheduleCommand(Guid.NewGuid(), null, null);
+
+        var result = _validator.TestValidate(command);
+
+        result.ShouldHaveValidationErrorFor(x => x.Priority);
+    }
+
+    [Fact]
+    public void Validate_PriorityLow_ShouldPass()
+    {
+        var command = new UpdateTaskScheduleCommand(Guid.NewGuid(), TaskPriority.Low, null);
+
+        var result = _validator.TestValidate(command);
+
+        result.ShouldNotHaveValidationErrorFor(x => x.Priority);
+    }
 
     [Fact]
     public void Validate_DueDateUtc_ShouldPass()

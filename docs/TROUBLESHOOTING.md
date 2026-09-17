@@ -126,6 +126,11 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: `RefreshTokenCommandHandler` now runs reuse detection only when `ReplacedByTokenId` is set — revoked by rotation. A token revoked without a successor gets a plain 401. The handler tests were split into rotated and logged-out cases; Requirements §9.3 was updated.
 **Why**: A security response that anyone can trigger is an attack surface of its own. The signal was "an old copy of a *live* chain"; the field that tells a live chain from a dead one already existed and was not consulted.
 
+### A24. A task update field left out of the body silently reset the value (M7)
+**Problem**: Found while writing the M7 report — no runtime error, all tests green. `Status` and `Priority` were non-nullable enums on `UpdateTaskStatusCommand` and `UpdateTaskScheduleCommand`, so a body omitting the field bound as `0` and passed `IsInEnum()`. `PATCH /api/tasks/{id}/schedule` with `{ "dueDate": null }` returned 204 and quietly set the priority to `Low`; the same shape on `/status` set `Pending`.
+**Fix**: Made both properties nullable, and put `.Cascade(CascadeMode.Stop).NotNull().IsInEnum()` on each in its validator, so an absent field is one 400 with `'Status' must not be empty.`; the handlers pass `request.Status!.Value`. Added a validator test per field and confirmed 400 against the running API, with the task's stored values unchanged.
+**Why**: A non-nullable value type cannot express "the client did not send this". The default is indistinguishable from a deliberate `0`, and a validator that only checks the *range* accepts it — so the strictest possible enum check still lets a silent reset through. Where absence must be refused, the type has to be able to represent absence first. Note that `DueDate` is the opposite case: there, `null` is a deliberate value that clears the date.
+
 ---
 
 ## B. Configuration & Wiring

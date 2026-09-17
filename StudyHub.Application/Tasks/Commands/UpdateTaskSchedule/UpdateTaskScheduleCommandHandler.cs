@@ -33,7 +33,8 @@ public class UpdateTaskScheduleCommandHandler : IRequestHandler<UpdateTaskSchedu
         if (task.UserId != _currentUser.UserId)
             throw new ForbiddenException("You do not own this task.");
 
-        task.UpdateSchedule(request.Priority, request.DueDate);
+        // ! لأن المدقّق رفض null قبل الوصول هنا (المعالِج يفترض مدخلاته صحيحة)
+        task.UpdateSchedule(request.Priority!.Value, request.DueDate);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }

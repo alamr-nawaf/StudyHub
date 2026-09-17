@@ -4,7 +4,7 @@
 
 M7 is implemented and verified; its roadmap status is **In progress**, waiting for the owner's review. A user can now list their courses, read a course's tree, list standalone items, read an item and its subtree, read their own profile (`GET /api/auth/me`), and update courses, item content, task status and task schedule. Reads go through three read-side interfaces that project to DTOs in SQL (ADR-32); another user's resource returns 403 on reads as on writes (ADR-33).
 
-Every step from 0 to 8 is done, each in its own commit on `feature/m7-content`. The build has 0 warnings and 0 errors; tests went from **105 to 141**, all green. All ten new endpoints were called against the running API with PostgreSQL: **50 calls, 50 matched the expected status**, and each update was read back to confirm the change. No stop condition was reached: no new package, no migration, no raw SQL, and no authentication code changed apart from adding `GET /api/auth/me`.
+Every step from 0 to 8 is done, each in its own commit on `feature/m7-content`, followed by one review fix (A24, below). The build has 0 warnings and 0 errors; tests went from **105 to 145**, all green. All ten new endpoints were called against the running API with PostgreSQL: **60 calls, 60 matched the expected status**, and each update was read back to confirm the change. No stop condition was reached: no new package, no migration, no raw SQL, and no authentication code changed apart from adding `GET /api/auth/me`.
 
 ## Test count at Step 0 and at the end
 
@@ -19,6 +19,7 @@ Every step from 0 to 8 is done, each in its own commit on `feature/m7-content`. 
 | Step 6 | 33 | 96 | 12 | **141** |
 | Step 7 | 33 | 96 | 12 | **141** |
 | Step 8 (end) | 33 | 96 | 12 | **141** |
+| After the A24 fix | 33 | 100 | 12 | **145** |
 
 ## Status of each step
 
@@ -33,6 +34,7 @@ Every step from 0 to 8 is done, each in its own commit on `feature/m7-content`. 
 | 6 — Update commands | Done. `UpdateCourse`, `UpdateItemContent`, `UpdateTaskStatus`, `UpdateTaskSchedule` with validators; four endpoints returning 204, route id applied with `with { Id = id }`; 14 handler tests + 4 schedule validator tests | `feat(content): add update commands for courses, items and tasks` |
 | 7 — Manual requests and a real run | Done. `M7` section (M7-1 … M7-18) appended to `StudyHub.API.http`; API started against PostgreSQL, 50 calls made, 50 matched the expected status; API stopped | `test(api): add M7 requests and record the real run` |
 | 8 — Documents and report | Done. `(M7)` tags removed; the ten endpoints moved into the Implemented table of Requirements §8; §6 tree shows what now exists; M7 set to **In progress** in §11; README endpoints and "Next: M8"; three debts removed from ARCHITECTURE §9; this report completed | `docs(m7): update documents and complete the M7 report` |
+| After Step 8 — A24 fix (owner's request) | Done. `Status` and `Priority` are nullable on the two task update commands and required by their validators, so an absent field is 400 instead of a silent reset; 4 validator tests added; 10 more calls against the running API, all matching | `fix(tasks): refuse an update body that omits status or priority` |
 
 ## Files added and changed
 
@@ -76,8 +78,8 @@ Compared with the baseline commit `chore: snapshot uncommitted M6 work before st
 - `Auth/Queries/GetCurrentUser/GetCurrentUserQueryHandlerTests.cs` (2)
 - `Courses/Commands/UpdateCourse/UpdateCourseCommandHandlerTests.cs` (3)
 - `Items/Commands/UpdateItemContent/UpdateItemContentCommandHandlerTests.cs` (3)
-- `Tasks/Commands/UpdateTaskStatus/UpdateTaskStatusCommandHandlerTests.cs` (4)
-- `Tasks/Commands/UpdateTaskSchedule/UpdateTaskScheduleCommandHandlerTests.cs` (4), `UpdateTaskScheduleCommandValidatorTests.cs` (4)
+- `Tasks/Commands/UpdateTaskStatus/UpdateTaskStatusCommandHandlerTests.cs` (4), `UpdateTaskStatusCommandValidatorTests.cs` (2, A24)
+- `Tasks/Commands/UpdateTaskSchedule/UpdateTaskScheduleCommandHandlerTests.cs` (4), `UpdateTaskScheduleCommandValidatorTests.cs` (6, two of them A24)
 
 **Documents**
 - Added `docs/M7_REPORT.md`
@@ -150,6 +152,27 @@ What the bodies showed, beyond the status codes:
 - **`GET /api/auth/me`** returned `id`, `fullName`, `email = "m7@test.com"`, `role = 0`, `monthlyTokenQuota = 100000`, `tokensUsedThisMonth = 0`.
 - **The projections run in SQL.** The EF Core command log shows the `ItemDto` projection as `CASE WHEN i."Kind" = 1 THEN i."Status" END` and friends, with no entity columns selected. A course tree is one statement (`WHERE "CourseId" = @courseId ORDER BY "Depth", "CreatedAt", "Id"`); an item tree is one statement for the root and one per level (`"ParentItemId" = ANY (@currentLevel)`), so the count follows the depth, not the number of rows.
 
+### Second run — the A24 fix
+
+Run on 2026-09-18 against the same API and database, with the same user `m7@test.com` on a fresh task.
+
+| # | Call | Method | Route | Expected | Actual | Result |
+|---|---|---|---|---|---|---|
+| 1 | register (account already exists) | POST | `/api/auth/register` | 409 | 409 | OK |
+| 2 | login | POST | `/api/auth/login` | 200 | 200 | OK |
+| 3 | task for the check (`priority: 2`) | POST | `/api/tasks` | 201 | 201 | OK |
+| 4 | read before | GET | `/api/items/{taskId}` | 200 | 200 | OK |
+| 5 | status body without `status` (`{ }`) | PATCH | `/api/tasks/{taskId}/status` | 400 | 400 | OK |
+| 6 | schedule body without `priority` (`{ "dueDate": null }`) | PATCH | `/api/tasks/{taskId}/schedule` | 400 | 400 | OK |
+| 7 | `status` sent explicitly as null | PATCH | `/api/tasks/{taskId}/status` | 400 | 400 | OK |
+| 8 | a real status still accepted | PATCH | `/api/tasks/{taskId}/status` | 204 | 204 | OK |
+| 9 | a real schedule still accepted | PATCH | `/api/tasks/{taskId}/schedule` | 204 | 204 | OK |
+| 10 | read after | GET | `/api/items/{taskId}` | 200 | 200 | OK |
+
+- **One message per missing field**, thanks to `Cascade(CascadeMode.Stop)`: `{"errors":{"Status":["'Status' must not be empty."]}}` and the same shape for `Priority`. Without it the range rule would have added a second, confusing message about a value that was never sent.
+- **The refused calls changed nothing.** The task read `status = 0, priority = 2` before them and still did after; only calls 8 and 9 moved it to `status = 1, priority = 0`.
+- **The same requests are in the `.http` file** as M7-19 and M7-20.
+
 ## Decisions I made
 
 1. **The uncommitted M6 work was committed as a separate baseline commit.** The session started on `Milestone6` with 23 modified and 18 untracked files (the administrator endpoint, seeding, `PasswordRuleExtensions`, `CLAUDE.md`, `docs/M7_PLAN.md`, …). Leaving them unstaged would have mixed them into the first M7 commit, and Step 1 edits `Requirements.md`, which already had pending changes. They are committed alone as `chore: snapshot uncommitted M6 work before starting M7`, so every later commit contains only M7 work. `.claude/` stayed untracked: it is local tool configuration.
@@ -167,7 +190,8 @@ What the bodies showed, beyond the status codes:
 13. **`UtcOrNull()` keeps the original message**, which names `DueDate` literally, as Step 2 asked ("same message"). A future date field other than `DueDate` would need the message to become a parameter.
 14. **Documents beyond the literal plan, to avoid a contradiction with the code** (CODING_STANDARDS §10): Requirements §6 now lists the query interfaces, `Pagination/`, the two new rule extensions and the DTO and mapping files; §8 gained two short paragraphs (update bodies replace every field and ignore a body `id`; enums are numbers, task fields are null for notes); CODING_STANDARDS §5 now shows `items.ToDto()` on `IQueryable` instead of `item.ToDto()` on an entity; ARCHITECTURE §9 says the quota moves to configuration in M8; §13 now says "None blocks M7" instead of the stale "None blocks M6".
 15. **The M7 row in §11 was set to "In progress".** Step 8 says to *leave* it "In progress", but it still said "Pending".
-16. **The real run made 50 calls, not one per endpoint.** Besides one success call per endpoint, it checks 403 for the second user on every single-resource endpoint (the plan asked for one), 404s, validation 400s, a note id on both task routes, clearing a due date, a body `id` being ignored, and a deleted item returning 404.
+16. **A missing `status` or `priority` is refused (A24), at the owner's request after Step 8.** Both properties became nullable so that "not sent" is expressible at all, and each validator now reads `.Cascade(CascadeMode.Stop).NotNull().IsInEnum()`. `Cascade(Stop)` is mine, beyond what was asked: without it a missing field produces the `NotNull` message *and* the range message for a value the client never sent. The handlers pass `request.Status!.Value` and `request.Priority!.Value`, since a handler may assume its input is valid (CODING_STANDARDS §6). `DueDate` stays nullable-and-optional: there, `null` means "clear the date". Requirements §8 now states the rule, and the two requests are in the `.http` file as M7-19 and M7-20.
+17. **The real run made 50 calls, not one per endpoint.** Besides one success call per endpoint, it checks 403 for the second user on every single-resource endpoint (the plan asked for one), 404s, validation 400s, a note id on both task routes, clearing a due date, a body `id` being ignored, and a deleted item returning 404.
 
 ## Contradictions found
 
@@ -183,14 +207,14 @@ No contradiction between the plan and `docs/Requirements.md` needed a stop.
 
 - **F7 (M7), new.** The first build failed with `MSB3021` because an API instance from an earlier session locked `StudyHub.Infrastructure.dll` and port 5158, while `dotnet test` passed. Found the process through the port owner, stopped it, and rebuilt.
 - **Not logged — a tooling slip, not a project problem.** Two long shell commands that wrote several files failed to parse (`unexpected EOF while looking for matching quote`), so nothing was written; the files were then written one by one. Nothing in the repository was affected.
-- **No endpoint mismatch.** All 50 calls returned the expected status on the first run, so no bug fix and no further log entry were needed.
+- **No endpoint mismatch.** All 50 calls of the first run returned the expected status, so that run needed no fix and no log entry.
+- **A24 (M7), new.** A task update body that omits `status` or `priority` bound the field as `0` and silently reset the value; the endpoint answered 204. Found while writing this report, fixed at the owner's request: both properties are nullable and required by their validators, and the refusal was confirmed against the running API (second run, calls 5–7).
 
 ## Not done
 
 - **M7 is not marked done.** It is "In progress" in §11 until the owner reviews this report.
 - **The `.http` M7 section was written but not sent through the REST Client.** The same flow was run from a script in the terminal (see Endpoint calls). The file's requests depend on `S1` and, for M7-18, on `S3` (`other@test.com`), whose account ADM6 may have deactivated (G5).
 - **No `psql` check.** The run verified results through the API and the EF command log only. Every write was read back through a query endpoint, but the soft delete of the standalone note was confirmed only as a 404, not as a row with `IsDeleted = true`.
-- **A missing enum field in an update body is not rejected.** `status` and `priority` are non-nullable enums, so a body without them binds as `0` (Pending / Low) and passes `IsInEnum`. That fits "each body replaces all of its fields" but can silently reset a value. Making the fields nullable with `NotNull()` would close it; the plan did not ask for it.
 - **The read-side EF queries have no automated test.** As ADR-32 records, the handlers mock the interfaces; until M10 the proof is the endpoint calls above.
-- **Test data left in the database:** users `m7@test.com` and `m7-other@test.com`, one course, one note, one task, and one soft-deleted standalone note.
+- **Test data left in the database:** users `m7@test.com` and `m7-other@test.com`, one course, one note, two tasks (one of them from the A24 check), and one soft-deleted standalone note.
 - **Nothing was pushed**, and `.claude/` remains untracked.

@@ -9,7 +9,11 @@ public class UpdateTaskStatusCommandValidator : AbstractValidator<UpdateTaskStat
 {
     public UpdateTaskStatusCommandValidator()
     {
-        // التعداد رقم في الـ JSON، فقيمة 99 تمرّ بلا هذا السطر
-        RuleFor(x => x.Status).IsInEnum();
+        // NotNull قبل IsInEnum: الحقل الغائب يُرفض بـ 400 بدل أن يصير Pending بصمت.
+        // والتعداد رقم في الـ JSON، فقيمة 99 تمرّ بلا IsInEnum
+        RuleFor(x => x.Status)
+            .Cascade(CascadeMode.Stop)
+            .NotNull()
+            .IsInEnum();
     }
 }

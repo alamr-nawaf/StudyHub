@@ -376,7 +376,7 @@ Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a compo
 
 Deletion, reading and content edits have one route for both notes and tasks, because those operations do not distinguish them. Status and schedule live under `/api/tasks`, because only a task has them.
 
-**Every update body replaces all of its fields.** A `null` `description`, `content` or `dueDate` clears the value. The id always comes from the route; an `id` in the body is ignored.
+**Every update body replaces all of its fields.** A `null` `description`, `content` or `dueDate` clears the value. A missing `status` or `priority` is a 400, not a silent reset to `0`: those two are required, and their absence is refused rather than guessed (A24). The id always comes from the route; an `id` in the body is ignored.
 
 **Enum values are numbers in JSON**, in both directions: `kind` (0 = note, 1 = task), `status`, `priority` and `role`. For a note, `status`, `priority` and `dueDate` are `null`.
 

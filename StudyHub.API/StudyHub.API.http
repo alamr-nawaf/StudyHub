@@ -501,3 +501,17 @@ Authorization: Bearer {{s.response.body.$.accessToken}}
 ### M7-18. عزل: المستخدم الثاني يقرأ عنصر الأول — المتوقع: 403 (ADR-33)
 GET {{baseUrl}}/api/items/{{m7task.response.body.$.taskId}}
 Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### M7-19. حالة بلا حقل status — المتوقع: 400 لا 204 بصمت (A24)
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/status
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ }
+
+### M7-20. جدول بلا حقل priority — المتوقع: 400 (A24)
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/schedule
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "dueDate": null }
