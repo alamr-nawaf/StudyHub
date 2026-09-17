@@ -9,6 +9,7 @@
 | Step 2 | 33 | 60 | 12 | **105** |
 | Step 3 | 33 | 65 | 12 | **110** |
 | Step 4 | 33 | 76 | 12 | **121** |
+| Step 5 | 33 | 78 | 12 | **123** |
 
 ## Status of each step
 
@@ -19,6 +20,7 @@
 | 2 — Shared pieces | Done. `PagedResult<T>`, `Paging`, `PagingRuleExtensions`, `UtcDateRuleExtensions`; `CreateTaskCommandValidator` uses the shared UTC rule and its four UTC tests stay green | `feat(common): add pagination and shared validation rules` |
 | 3 — Courses: list | Done. `CourseDto`, `CourseMappings.ToDto`, `ICourseQueries` + `CourseQueries`, `GetCourses` slice, `GET /api/courses`; 2 handler + 3 validator tests | `feat(courses): add course list query` |
 | 4 — Items: read | Done. `ItemDto`, `ItemMappings.ToDto`, `IItemQueries` + `ItemQueries`, `GetItem`, `GetRootItems`, `GetItemTree`, `GetCourseTree`; four endpoints; 11 handler tests | `feat(items): add item and tree read queries` |
+| 5 — Current user | Done. `CurrentUserDto`, `IUserQueries` + `UserQueries` (Email projected whole, `.Value` read in memory, D6), `GetCurrentUser` slice, `GET /api/auth/me`; 2 handler tests | `feat(auth): add current user query` |
 
 ## Decisions I made
 

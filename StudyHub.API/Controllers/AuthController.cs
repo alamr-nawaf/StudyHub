@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Auth.Commands.Login;
 using StudyHub.Application.Auth.Commands.Logout;
 using StudyHub.Application.Auth.Commands.Refresh;
+using StudyHub.Application.Auth.Queries.GetCurrentUser;
 using StudyHub.Application.Users.Commands.RegisterUser;
 
 namespace StudyHub.API.Controllers;
@@ -49,5 +50,13 @@ public class AuthController : ControllerBase
     {
         await _mediator.Send(command, cancellationToken);
         return NoContent();
+    }
+
+    // محمي بالسياسة الافتراضية. الاسم والبريد من القاعدة لا من التوكن، فالتوكن لا يحملهما (ADR-21)
+    [HttpGet("me")]
+    public async Task<IActionResult> Me(CancellationToken cancellationToken)
+    {
+        var user = await _mediator.Send(new GetCurrentUserQuery(), cancellationToken);
+        return Ok(user);
     }
 }

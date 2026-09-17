@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
         // جانب القراءة منفصل عن المستودعات: المستودع يحمّل كيانات للأوامر، والاستعلام يُسقط DTO (ADR-32)
         services.AddScoped<ICourseQueries, CourseQueries>();
         services.AddScoped<IItemQueries, ItemQueries>();
+        services.AddScoped<IUserQueries, UserQueries>();
         // تسجيل الـ DbContext مع محرك PostgreSQL
         services.AddDbContext<StudyHubDbContext>(options =>
             options.UseNpgsql(connectionString));
