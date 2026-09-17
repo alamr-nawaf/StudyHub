@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Common.Pagination;
 using StudyHub.Application.Courses.Commands.CreateCourse;
 using StudyHub.Application.Courses.Commands.DeleteCourse;
+using StudyHub.Application.Courses.Commands.UpdateCourse;
 using StudyHub.Application.Courses.Queries.GetCourses;
 using StudyHub.Application.Courses.Queries.GetCourseTree;
 
@@ -41,6 +42,17 @@ public class CoursesController : ControllerBase
     {
         var tree = await _mediator.Send(new GetCourseTreeQuery(id), cancellationToken);
         return Ok(tree);
+    }
+
+    // المعرّف من المسار لا من الجسم: with يكتب فوق أي id أرسله العميل
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(
+        Guid id,
+        UpdateCourseCommand command,
+        CancellationToken cancellationToken)
+    {
+        await _mediator.Send(command with { Id = id }, cancellationToken);
+        return NoContent();
     }
 
     [HttpDelete("{id:guid}")]

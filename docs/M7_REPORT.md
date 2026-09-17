@@ -10,6 +10,7 @@
 | Step 3 | 33 | 65 | 12 | **110** |
 | Step 4 | 33 | 76 | 12 | **121** |
 | Step 5 | 33 | 78 | 12 | **123** |
+| Step 6 | 33 | 96 | 12 | **141** |
 
 ## Status of each step
 
@@ -21,6 +22,7 @@
 | 3 — Courses: list | Done. `CourseDto`, `CourseMappings.ToDto`, `ICourseQueries` + `CourseQueries`, `GetCourses` slice, `GET /api/courses`; 2 handler + 3 validator tests | `feat(courses): add course list query` |
 | 4 — Items: read | Done. `ItemDto`, `ItemMappings.ToDto`, `IItemQueries` + `ItemQueries`, `GetItem`, `GetRootItems`, `GetItemTree`, `GetCourseTree`; four endpoints; 11 handler tests | `feat(items): add item and tree read queries` |
 | 5 — Current user | Done. `CurrentUserDto`, `IUserQueries` + `UserQueries` (Email projected whole, `.Value` read in memory, D6), `GetCurrentUser` slice, `GET /api/auth/me`; 2 handler tests | `feat(auth): add current user query` |
+| 6 — Update commands | Done. `UpdateCourse`, `UpdateItemContent`, `UpdateTaskStatus`, `UpdateTaskSchedule` with validators; four endpoints returning 204, route id applied with `with { Id = id }`; 14 handler tests + 4 schedule validator tests | `feat(content): add update commands for courses, items and tasks` |
 
 ## Decisions I made
 

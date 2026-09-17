@@ -2,13 +2,14 @@
 using Microsoft.AspNetCore.Mvc;
 using StudyHub.Application.Common.Pagination;
 using StudyHub.Application.Items.Commands.DeleteItem;
+using StudyHub.Application.Items.Commands.UpdateItemContent;
 using StudyHub.Application.Items.Queries.GetItem;
 using StudyHub.Application.Items.Queries.GetItemTree;
 using StudyHub.Application.Items.Queries.GetRootItems;
 
 namespace StudyHub.API.Controllers;
 
-// متحكّم واحد للقراءة والحذف: العمليتان لا تفرّقان بين ملاحظة ومهمة
+// متحكّم واحد لما لا يفرّق بين ملاحظة ومهمة: القراءة وتعديل المحتوى والحذف
 [ApiController]
 [Route("api/items")]
 public class ItemsController : ControllerBase
@@ -40,6 +41,17 @@ public class ItemsController : ControllerBase
     {
         var tree = await _mediator.Send(new GetItemTreeQuery(id), cancellationToken);
         return Ok(tree);
+    }
+
+    // المعرّف من المسار لا من الجسم: with يكتب فوق أي id أرسله العميل
+    [HttpPatch("{id:guid}")]
+    public async Task<IActionResult> UpdateContent(
+        Guid id,
+        UpdateItemContentCommand command,
+        CancellationToken cancellationToken)
+    {
+        await _mediator.Send(command with { Id = id }, cancellationToken);
+        return NoContent();
     }
 
     [HttpDelete("{id:guid}")]
