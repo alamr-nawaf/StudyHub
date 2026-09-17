@@ -41,7 +41,7 @@ This is a **personal learning project**. The explicit goal is to practise profes
 - **UC-04**: As a user, I can create notes and tasks that either stand alone, sit under a course, or nest under another note or task — in any combination, up to five levels deep. Tasks additionally carry a status (Pending, InProgress, Completed), a priority, and an optional due date.
 - **UC-05**: As a system, deleting any node deletes its entire subtree across every level, using soft delete so nothing is physically removed from the database.
 
-> **UC-03 and UC-05 no longer say "archive" (v3.0).** v2.0 used the word *archive*, which promises the user that what was archived can be seen and restored. §12 states that correct restore is impossible with the current `IsDeleted` design. A document that promises what the design cannot deliver is worse than one that admits the gap. The word is now *delete*. The `DeletedAt` + `DeletedBatchId` change that would make restore possible is scheduled in M7 — see §12 and ADR-25.
+> **UC-03 and UC-05 no longer say "archive" (v3.0).** v2.0 used the word *archive*, which promises the user that what was archived can be seen and restored. §12 states that correct restore is impossible with the current `IsDeleted` design. A document that promises what the design cannot deliver is worse than one that admits the gap. The word is now *delete*. The `DeletedAt` + `DeletedBatchId` change that would make restore possible is deferred — see §12 and ADR-25.
 
 > **UC-05 reverses v1.1 deliberately.** The v1.1 wording specified *"Soft-Delete Cascade prevention"* — deleting a course was supposed to leave its tasks untouched. The current design does the opposite: deletion cascades down the whole tree. This is an intentional change of direction, not a correction of a bug. Rationale in ADR-08 and ADR-09.
 
@@ -168,7 +168,7 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | 10 | **`Depth` stored as a column** | Enables `CK_Item_Depth` and `CK_Item_RootDepth` at the database level, and removes the need for a depth-calculation service | Same dependency on rule 3.2.7 as ADR-09. Also caps AI extraction depth — see ADR-26 |
 | 11 | Level-by-level subtree fetch, not `WITH RECURSIVE` | "One query per level" only matters when levels are unbounded; depth is capped at five. Staying in LINQ keeps the soft-delete filter applied automatically and avoids a hand-maintained SQL string | At most five round trips instead of two |
 | 12 | Soft delete + EF global query filters | Nothing is ever physically lost | Every table grows and never shrinks; raw SQL bypasses the filter entirely; correct restore is not possible until ADR-25 lands |
-| 13 | Repository + Unit of Work over EF Core | Handler tests need no database; the pattern is worth learning | **Technically redundant** — `DbContext` is already a unit of work and `DbSet<T>` already a repository. An extra abstraction layer, and `IQueryable` composition is lost at the boundary — so read queries must project inside Infrastructure; where exactly is open (§13) |
+| 13 | Repository + Unit of Work over EF Core | Handler tests need no database; the pattern is worth learning | **Technically redundant** — `DbContext` is already a unit of work and `DbSet<T>` already a repository. An extra abstraction layer, and `IQueryable` composition is lost at the boundary — so read queries must project inside Infrastructure, through read-side query interfaces (ADR-32) |
 | 14 | Controllers, not Minimal APIs | Attribute routing, filters, and `[Authorize]` are conventional and well documented | Slightly more ceremony per endpoint |
 | 15 | `IExceptionHandler`, not custom middleware | The modern ASP.NET Core replacement; returns RFC-shaped `ProblemDetails` | — |
 | 16 | Duplicate token accounting: `User.TokensUsedThisMonth` **and** `AiUsageLogs` | The counter answers "is there quota left" in one read; the log answers "what was it spent on" | They must be updated together, inside one method on `User`, or they drift |
@@ -180,13 +180,16 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | **22** | **Offset pagination (`page`, `pageSize`), default 20, hard maximum 100** | Per-user datasets are small; offset is simpler and permits jumping to a page | Pages shift when rows are inserted or deleted between requests, and deep offsets get slow. Switch to cursor pagination when either becomes visible |
 | **23** | **A subtree is returned as a flat list, not nested JSON** | Projects straight into a DTO with one `Select`, and needs no self-referencing DTO or recursive mapper. Not chosen for pagination — a tree is never paginated (§14.2) | The client assembles the tree from `ParentItemId`. Roughly ten lines of client code |
 | **24** | **Quota is pre-checked against an estimate; usage recording never throws** | An external call that has already been paid for must never have its result discarded by an accounting rule | The hard guarantee "the counter never exceeds the quota" is lost — each request that passes the pre-check may overshoot by the gap between estimate and actual, and parallel requests all pass it before any of them records. Some requests are refused that would have fitted |
-| **25** | **`DeletedAt` + `DeletedBatchId` replace `IsDeleted` — scheduled M7** | Correct restore needs to distinguish an item deleted deliberately from one deleted by cascade. A shared batch id per delete operation answers that in one column | A migration, a query-filter change, a `MarkAsDeleted` signature change, and every test asserting `IsDeleted`. **Cheap only while no real data exists — this is why it is scheduled, not deferred indefinitely** |
+| **25** | **`DeletedAt` + `DeletedBatchId` replace `IsDeleted` — deferred** | Correct restore needs to distinguish an item deleted deliberately from one deleted by cascade. A shared batch id per delete operation answers that in one column | A migration, a query-filter change, a `MarkAsDeleted` signature change, and every test asserting `IsDeleted`. The project is not deployed, so no real data will ever make this change expensive; it is deferred rather than scheduled. |
 | **26** | **AI extraction is refused with 409 when the source note sits at maximum depth** | Approved tasks become children of their source note; a child of a depth-4 note is depth 5, which the entity rejects — so every suggestion would be impossible to approve. Refusing before the external call spends nothing | A user cannot extract from a deeply nested note at all. The alternative — creating the tasks as siblings — would silently break the provenance that is UC-06's entire justification |
 | **27** | **Optimistic concurrency on rotation: PostgreSQL's `xmin` is the concurrency token of `RefreshTokens`** | Rotation reads a row and writes it back. Without a check, two parallel refreshes with one token both succeed and fork the chain into two valid ones, and reuse detection never fires. `xmin` is maintained by PostgreSQL itself, so no column is added; it is mapped in Infrastructure as a shadow property, so no Domain type gains a persistence field | A legitimate client that refreshes twice in parallel loses one request (409) and must serialize its refreshes. No grace window (§12) |
 | **28** | **Extraction returns suggestions; nothing is written until the user approves** *(M8)* | AI output enters the user's tree only through a human decision. Approval needs no endpoint of its own: the client creates each approved task through `POST /api/tasks` with the note as parent. Usage is recorded at extraction time, so approving nothing still costs quota | Once created, an extracted task is indistinguishable from a hand-written one. Suggestions are not stored: a client that loses them pays again to extract again |
 | **29** | **Tokens are generated with `Microsoft.IdentityModel.JsonWebTokens`, not `System.IdentityModel.Tokens.Jwt`** | The latter is the previous generation of the same library, and ASP.NET Core 8+ validates bearer tokens with `JsonWebTokenHandler` by default. Writing and reading tokens with the same handler removes one source of claim-name mismatches (§9.1) | Most tutorials still show `JwtSecurityTokenHandler`; their examples need translating |
 | **30** | **A handler asks the entity before acting; the entity re-checks the same question** | The rule is written once, in the Domain, and enforced twice with two meanings. In the handler it is an expected refusal and becomes a precise 4xx; in the entity it is an invariant that protects every other caller. Ownership already follows this shape (§6) | A handler that forgets to ask returns 500 instead of 409 — the data stays safe, only the status is wrong. Every handler that nests items must ask |
 | **31** | **One `Role` column on `Users`; permissions are code — constants plus a role-to-permissions map in Domain** | Three designs were costed. Full RBAC tables (`Roles`, `Permissions`, `UserRoles`, `RolePermissions`) means four tables, seed data, two joins on every check and eventually an admin screen to edit what never changes — all to tell two roles apart. ASP.NET Core Identity brings its own `DbContext`, its own user entity and its own migrations, so the rich `User` here is either replaced or duplicated and the domain rules move into a library this project does not own. A column plus a code map costs neither. **Permissions in code live in `git` history: reviewed, diffed and tested. A permissions table editable in production is the shortest path to a silent privilege escalation** | Changing what a role may do needs a deployment, not an `UPDATE`. One user cannot hold two roles. A third role needs a migration, because `CK_User_RoleValue` fixes the range. Adding a *capability* to an existing role does not: one constant, one line in the map, one attribute on the endpoint. The Domain carries permission strings that ASP.NET Core consumes as policy names — plain `string`, no dependency, so the zero-dependency rule (§4) holds |
+| **32** | **Read queries go through read-side interfaces that return DTOs (`ICourseQueries`, `IItemQueries`, `IUserQueries`); repositories stay write-side** | Queries must project with `Select` inside Infrastructure (ADR-13, §6). Keeping reads out of the repositories leaves each repository about loading entities for commands, and each query interface about shaping responses | One more interface and implementation per area. The EF projections are not covered by unit tests, because handlers mock the interface; until M10 the proof of a query is calling its endpoint |
+| **33** | **Reading another user's resource returns 403, the same as writing it** | The write path already reveals existence through its 403, so a 404 on reads alone would hide nothing; one rule for both paths is simpler | A caller can tell that an id exists |
+| **34** | **`GET /api/courses` returns no item counts** | No client needs them yet, and a count per course is easy to write as an N+1 | A client that wants counts reads the course tree. Counts are added when a consumer asks for them (A16) |
 
 ---
 
@@ -218,6 +221,7 @@ StudyHub.Application/
 ├── Courses/Commands/{CreateCourse, DeleteCourse}/
 ├── Courses/Commands/UpdateCourse/                                      (M7)
 ├── Courses/Queries/GetCourses/                                         (M7)
+├── Courses/Queries/GetCourseTree/                                      (M7)
 ├── Notes/Commands/CreateNote/
 ├── Notes/Commands/ExtractTaskSuggestions/                              (M8)
 ├── Tasks/Commands/CreateTask/
@@ -239,7 +243,7 @@ StudyHub.Application/
 
 **Defence in depth is deliberate.** Ownership of a parent item is checked twice — once in the handler (to return a precise 403) and once inside `Item.Initialize` (because the entity trusts no caller). Depth follows the same shape: the handler asks `parent.IsAtMaxDepth` and returns 409, and `Item.Initialize` asks the same member (ADR-30). Course ownership is checked in the handler only, since the entity receives a `Guid` rather than an object; that asymmetry is known and accepted.
 
-**Commands and queries have different fetch rules** *(M7)*. A query projects directly into its DTO with `Select` and never materializes an entity. A command loads the whole entity, because it is about to call a method on it. Since repositories do not expose `IQueryable` (ADR-13), the projection has to run inside Infrastructure; where exactly is open (§13).
+**Commands and queries have different fetch rules** *(M7)*. A query projects directly into its DTO with `Select` and never materializes an entity. A command loads the whole entity, because it is about to call a method on it. Since repositories do not expose `IQueryable` (ADR-13), the projection has to run inside Infrastructure, in a read-side query interface (ADR-32).
 
 ---
 
@@ -274,7 +278,7 @@ From M8, concurrent AI requests write `TokensUsedThisMonth`; how an increment su
 | UserId | uuid | FK → Users (**Restrict**), indexed |
 | Title | varchar(200) | required |
 | Description | text | nullable |
-| IsDeleted | bool | soft delete — becomes `DeletedAt` + `DeletedBatchId` in M7 (ADR-25) |
+| IsDeleted | bool | soft delete — `DeletedAt` + `DeletedBatchId` is deferred (ADR-25, §12) |
 | CreatedAt / UpdatedAt | timestamptz | |
 
 Check constraint: `CK_Course_Title` — `"Title" ~ '\S'` (at least one non-whitespace character).
@@ -289,7 +293,7 @@ Check constraint: `CK_Course_Title` — `"Title" ~ '\S'` (at least one non-white
 | Depth | int | 0–4 |
 | Title | varchar(250) | required |
 | Content | text? | deliberately unbounded — it is the body |
-| IsDeleted | bool | soft delete — becomes `DeletedAt` + `DeletedBatchId` in M7 (ADR-25) |
+| IsDeleted | bool | soft delete — `DeletedAt` + `DeletedBatchId` is deferred (ADR-25, §12) |
 | Kind | int | TPH discriminator: 0 = Note, 1 = Task. **Immutable** (rule 3.2.8) |
 | Status | int? | tasks only |
 | Priority | int? | tasks only |
@@ -537,8 +541,8 @@ The path of an authorized request: login issues the `role` claim → `[Authorize
 | **M5.1** | **Cleanup**: exception file split, `Infrastructure.Tests` with the `D4` and `D5` proofs, `Email.FromPersisted`, UTC rule, depth refused with 409 (ADR-30) | ✅ |
 | **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ✅ |
 | **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ✅ |
-| M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination, quota to configuration, **`DeletedAt` + `DeletedBatchId` migration (ADR-25)** | Pending |
-| M8 | AI integration & quota enforcement (UC-06, UC-07): suggestion endpoint with user approval (ADR-28), `ConsumeTokens` split, counter concurrency (§13), failure model, extraction depth guard | Pending |
+| M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | Pending |
+| M8 | AI integration & quota enforcement (UC-06, UC-07): suggestion endpoint with user approval (ADR-28), `ConsumeTokens` split, counter concurrency (§13), failure model, extraction depth guard, quota to configuration | Pending |
 | M9 | Dashboard aggregation (UC-08) as defined in §15.4 | Pending |
 | M10 | Integration tests, rate limiting, refresh-token cleanup, API containerization | Pending |
 
@@ -553,7 +557,7 @@ Each of these is a decision, not an oversight.
 | Item | Why deferred | What it will cost later |
 |---|---|---|
 | **Node moving** | No use case requires it; it is the single largest source of complexity in a free-nesting tree | Cycle detection, subtree depth recalculation, `CourseId` rewrite down every descendant. Invalidates ADR-09 and ADR-10 |
-| **Restore after delete** | Not requested — but the schema change that makes it *possible* is scheduled in M7, because it is cheap only while the database is empty | Currently impossible: after a cascade delete nothing distinguishes a child deleted deliberately from one deleted by cascade. ADR-25 fixes the schema; the restore handler itself remains deferred |
+| **Restore after delete** | Not requested. The schema change that makes it *possible* (ADR-25) is deferred too: the project is not deployed, so no real data will make it expensive later | Currently impossible: after a cascade delete nothing distinguishes a child deleted deliberately from one deleted by cascade. ADR-25 fixes the schema; the restore handler comes after it |
 | **Absolute session lifetime cap** | Rotation with reuse detection already limits the damage of a stolen token | A `SessionStartedAt` column or a walk back up the `ReplacedByTokenId` chain, plus a forced re-login the user did not ask for |
 | **"Sign out of all devices"** | Logout is per-device (§9.1); the all-device revocation path is built anyway, for reuse detection (M6) | A query for the user's active tokens — deliberately left out of `IRefreshTokenRepository` until something needs it — plus an endpoint |
 | **Refresh token cleanup** | The table only grows with sessions, and there are none yet | A background job or a scheduled `DELETE` for rows expired more than N days ago. M10 |
@@ -579,17 +583,16 @@ Each of these is a decision, not an oversight.
 
 ## 13. Open Questions
 
-Closed since v2.0: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate**. The authentication questions are answered in §9.1; the registration message is an accepted risk (§9.4); `DeletedAt` is scheduled (ADR-25); pagination, tree shape, and concurrency are settled in §14; the approval flow and quota ordering in §15.
+Closed since v2.0: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate**. The authentication questions are answered in §9.1; the registration message is an accepted risk (§9.4); `DeletedAt` is deferred (ADR-25); pagination, tree shape, and concurrency are settled in §14; the approval flow and quota ordering in §15. Three M7 questions are closed as well: item counts on `GET /api/courses` (question 3, ADR-34), where a read query projects (question 4, ADR-32), and reading another user's resource (question 7, ADR-33).
 
-Still open. None blocks M6; each names the milestone that needs the answer:
+Still open. None blocks M7; each names the milestone that needs the answer. The remaining questions keep their original numbers, because other text refers to them by number:
 
 1. **AI provider and its abstraction** (M8) — which provider (Gemini is the current candidate, named in `ARCHITECTURE.md` §4.6), and is a single `IAiService` enough, or should the prompt and response contract be modelled explicitly?
 2. **Estimated cost per AI operation** (M8, §15.1) — a fixed reserve per operation type, or a multiple of the input length? The second is more accurate and needs a tokenizer.
-3. **Should `GET /api/courses` return item counts per course?** (M7) Useful for a dashboard; a possible N+1 if written carelessly.
-4. **Where does a read query project?** (M7) Repositories lose `IQueryable` (ADR-13), yet queries must project with `Select` (§6). Either repository methods return DTOs — simplest, but one interface then serves both writing and reading — or queries get their own read-side interface — cleaner CQRS, one more interface.
-5. **How does the token counter survive concurrent extractions?** (M8, §14.4) It must neither lose an increment nor fail a paid call. Either an atomic `UPDATE … SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n` — never conflicts, but bypasses `RecordTokenUsage` and needs its own transaction with the log insert — or optimistic concurrency with a retry — keeps the domain method, but needs a reload-and-retry path in Infrastructure.
-6. **What does "recent courses" mean?** (M9, §15.4) As defined, the most recently created or edited. Ordering by the latest item activity is truer to the word, at the cost of one aggregate per course.
-7. **Reading another user's item: 404 or 403?** (M7) 403 matches the write path; 404 hides that the item exists. The write path already reveals existence through its 403, so hiding it on reads alone buys little — but the choice must be written before the first query handler.
+
+**5.** **How does the token counter survive concurrent extractions?** (M8, §14.4) It must neither lose an increment nor fail a paid call. Either an atomic `UPDATE … SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n` — never conflicts, but bypasses `RecordTokenUsage` and needs its own transaction with the log insert — or optimistic concurrency with a retry — keeps the domain method, but needs a reload-and-retry path in Infrastructure.
+
+**6.** **What does "recent courses" mean?** (M9, §15.4) As defined, the most recently created or edited. Ordering by the latest item activity is truer to the word, at the cost of one aggregate per course.
 
 ---
 

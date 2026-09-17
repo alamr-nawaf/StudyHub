@@ -64,6 +64,8 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Exception messages are English; comments are Arabic.** Messages reach the client and the logs; comments explain intent to the author. Comments state *why*, never *what* — the code already says what.
 
+Every class, record and interface starts with a short English `/// <summary>` that says what it is for. Classes written before M7 keep their existing comments.
+
 ---
 
 ## 5. API & Error Handling
@@ -117,7 +119,7 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **A handler assumes its input is already valid.** Validation ran in the pipeline. Handlers check *state* (does the parent exist, is it owned, does it have room) — never *shape*.
 
-**Queries project; commands load** *(M7)*. A query projects into its DTO with `Select` and never materializes an entity; a command loads the entity it is about to call. Where the projection lives is decided before M7 (Requirements §13).
+**Queries project; commands load** *(M7)*. A query projects into its DTO with `Select` and never materializes an entity; a command loads the entity it is about to call. The projection lives in a read-side query interface implemented in Infrastructure (Requirements ADR-32).
 
 ---
 
@@ -137,7 +139,7 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Every column gets an explicit length** unless unbounded text is a deliberate decision that is written down. EF's default for silence is `text` (A14).
 
-**Global query filters apply to LINQ only.** Raw SQL bypasses `!IsDeleted` (`DeletedAt == null` from M7) entirely. If you write raw SQL, the filter is your responsibility.
+**Global query filters apply to LINQ only.** Raw SQL bypasses `!IsDeleted` entirely (`DeletedAt == null` is deferred, Requirements §12). If you write raw SQL, the filter is your responsibility.
 
 **A row that parallel requests read, modify, and write back carries a concurrency token** (Requirements §14.4). Use PostgreSQL's `xmin`, mapped as a shadow property so the Domain gains nothing. The generated migration must add no column — read it before applying.
 

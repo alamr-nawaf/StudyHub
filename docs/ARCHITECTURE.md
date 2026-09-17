@@ -94,7 +94,7 @@ Free, strong relational guarantees, and identical behaviour in local Docker and 
 
 **Table-Per-Hierarchy (TPH)**: `Note` and `TaskItem` are distinct C# classes stored in one `Items` table with an integer `Kind` discriminator. See §6 for the full explanation.
 
-**A trap worth knowing**: EF's global query filters (`!IsDeleted`, becoming `DeletedAt == null` in M7) apply to LINQ only. Any raw SQL bypasses them completely.
+**A trap worth knowing**: EF's global query filters (`!IsDeleted`; `DeletedAt == null` is deferred, Requirements §12) apply to LINQ only. Any raw SQL bypasses them completely.
 
 ### Application pattern — MediatR 14 (CQRS)
 
@@ -310,7 +310,7 @@ graph LR
     end
 ```
 
-From M7, one delete operation stamps a single `DeletedBatchId` on every row it touches, so a later restore can tell a cascade from a deliberate delete (ADR-25).
+Stamping one `DeletedBatchId` on every row a delete operation touches, so a later restore can tell a cascade from a deliberate delete, is deferred (ADR-25, Requirements §12).
 
 **The course path needs no traversal at all.** Because every nested item inherits its root's `CourseId`, a flat `WHERE CourseId = @id` already returns the entire tree at every depth. That is the payoff of the deliberate duplication in ADR-09.
 
@@ -593,8 +593,8 @@ Documented on purpose. A learning project is more useful when its gaps are visib
 
 ### Design limits
 - **Node moving is not supported.** Three other decisions — stored depth, inherited `CourseId`, and the absence of cycle detection — are safe *only* because of this. Adding moving invalidates all three at once.
-- **Correct restore is impossible as designed.** After a cascade delete, nothing distinguishes a child deleted deliberately from one deleted by cascade. Fixing it means `DeletedAt` plus `DeletedBatchId` instead of `IsDeleted` — scheduled for M7 while it is still cheap, before real data exists (ADR-25).
-- **Repository + Unit of Work over EF Core is technically redundant.** `DbContext` is already a unit of work and `DbSet<T>` already a repository. Kept because the pattern is worth learning, at the cost of an extra abstraction and the loss of `IQueryable` composition at the boundary — so read queries must project inside Infrastructure; where exactly is open (Requirements §13).
+- **Correct restore is impossible as designed.** After a cascade delete, nothing distinguishes a child deleted deliberately from one deleted by cascade. Fixing it means `DeletedAt` plus `DeletedBatchId` instead of `IsDeleted` — deferred, because the project is not deployed and no real data will make it expensive (ADR-25, Requirements §12).
+- **Repository + Unit of Work over EF Core is technically redundant.** `DbContext` is already a unit of work and `DbSet<T>` already a repository. Kept because the pattern is worth learning, at the cost of an extra abstraction and the loss of `IQueryable` composition at the boundary — so read queries project inside Infrastructure, through read-side query interfaces (Requirements ADR-32).
 - **Last write wins on content edits.** Only refresh tokens get a concurrency token; two tabs editing one item overwrite each other silently (Requirements §12).
 
 ### Infrastructure
