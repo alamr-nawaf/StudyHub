@@ -8,6 +8,7 @@
 | Step 1 | 33 | 60 | 12 | **105** |
 | Step 2 | 33 | 60 | 12 | **105** |
 | Step 3 | 33 | 65 | 12 | **110** |
+| Step 4 | 33 | 76 | 12 | **121** |
 
 ## Status of each step
 
@@ -17,6 +18,7 @@
 | 1 — Record the decisions | Done. ADR-32/33/34 added; §13 questions 3, 4, 7 closed; ADR-25 and every `DeletedAt` mention now say deferred; quota to configuration moved to M8; `GetCourseTree` added to §6; `/// <summary>` rule added to CODING_STANDARDS §4 | `docs: record M7 decisions (ADR-32 to ADR-34)` |
 | 2 — Shared pieces | Done. `PagedResult<T>`, `Paging`, `PagingRuleExtensions`, `UtcDateRuleExtensions`; `CreateTaskCommandValidator` uses the shared UTC rule and its four UTC tests stay green | `feat(common): add pagination and shared validation rules` |
 | 3 — Courses: list | Done. `CourseDto`, `CourseMappings.ToDto`, `ICourseQueries` + `CourseQueries`, `GetCourses` slice, `GET /api/courses`; 2 handler + 3 validator tests | `feat(courses): add course list query` |
+| 4 — Items: read | Done. `ItemDto`, `ItemMappings.ToDto`, `IItemQueries` + `ItemQueries`, `GetItem`, `GetRootItems`, `GetItemTree`, `GetCourseTree`; four endpoints; 11 handler tests | `feat(items): add item and tree read queries` |
 
 ## Decisions I made
 

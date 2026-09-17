@@ -1,9 +1,10 @@
 ﻿using MediatR;
 using Microsoft.AspNetCore.Mvc;
-using StudyHub.Application.Courses.Commands.CreateCourse;
 using StudyHub.Application.Common.Pagination;
+using StudyHub.Application.Courses.Commands.CreateCourse;
 using StudyHub.Application.Courses.Commands.DeleteCourse;
 using StudyHub.Application.Courses.Queries.GetCourses;
+using StudyHub.Application.Courses.Queries.GetCourseTree;
 
 namespace StudyHub.API.Controllers;
 
@@ -32,6 +33,14 @@ public class CoursesController : ControllerBase
     {
         var result = await _mediator.Send(new GetCoursesQuery(page, pageSize), cancellationToken);
         return Ok(result);
+    }
+
+    // قائمة مسطّحة غير مُرقَّمة، والعميل يبني الشجرة من ParentItemId (ADR-23)
+    [HttpGet("{id:guid}/tree")]
+    public async Task<IActionResult> GetTree(Guid id, CancellationToken cancellationToken)
+    {
+        var tree = await _mediator.Send(new GetCourseTreeQuery(id), cancellationToken);
+        return Ok(tree);
     }
 
     [HttpDelete("{id:guid}")]
