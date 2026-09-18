@@ -131,6 +131,11 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: Made both properties nullable, and put `.Cascade(CascadeMode.Stop).NotNull().IsInEnum()` on each in its validator, so an absent field is one 400 with `'Status' must not be empty.`; the handlers pass `request.Status!.Value`. Added a validator test per field and confirmed 400 against the running API, with the task's stored values unchanged.
 **Why**: A non-nullable value type cannot express "the client did not send this". The default is indistinguishable from a deliberate `0`, and a validator that only checks the *range* accepts it — so the strictest possible enum check still lets a silent reset through. Where absence must be refused, the type has to be able to represent absence first. Note that `DueDate` is the opposite case: there, `null` is a deliberate value that clears the date.
 
+### A25. The provider response was read as if no model ever thinks (M8)
+**Problem**: Found during code review before the first real Gemini call — no runtime error, because only the fake provider had ever answered. The parser read `candidates[0].content.parts[0].text`. A reasoning model returns its thinking as extra parts marked `thought`, so `parts[0]` would have been the *reasoning*, handed back as the summary; and when such a model exhausts `maxOutputTokens` while still thinking it returns a candidate with no `content` at all, which would have thrown inside the `try` and become a 502 naming nothing.
+**Fix**: Walk every part, skip the ones marked `thought`, concatenate the rest, and treat each step down the response as optional. `finishReason` is logged when an answer cannot be read, with a dedicated message for `MAX_TOKENS`; a non-success status logs the first 500 characters of the body. `Ai:ThinkingBudget` and `Ai:ThinkingLevel` pass a thinking cap through to the provider, and are absent unless configured. Nine tests in `GeminiAiServiceTests` drive real thinking-model payloads through a stub `HttpMessageHandler`.
+**Why**: Code written against one provider response is written against *one example* of it. The shape an external API is allowed to return is wider than the shape it happened to return, and the parts of a response that are optional are exactly the parts that appear first in production. Walk what a contract permits, not what a sample showed.
+
 ---
 
 ## B. Configuration & Wiring
@@ -179,6 +184,11 @@ A record of every technical problem hit during development, how it was fixed, an
 **Problem**: Found during code review. `JwtBearer` validated tokens, yet only the `debug-claims` actions carried `[Authorize]`. A request with no token, a malformed token, or the old `X-User-Id` header reached the handler anonymously and failed in `CurrentUserService` as **403**, not 401 — and `DELETE /api/courses/{id}` answered 404 or 403 depending on whether the id existed.
 **Fix**: A `FallbackPolicy` requiring an authenticated user in `Program.cs`, with `[AllowAnonymous]` on register, login, refresh, and `MapOpenApi()`. Verified over HTTP: all three cases return 401.
 **Why**: Authentication identifies the caller; only authorization *refuses* one. Registering the scheme protects nothing on its own. Make protection the default and exposure the declaration, so a forgotten attribute fails closed.
+
+### B10. The API refused to start because user secrets were never read (M8)
+**Problem**: Starting the API for the M8 run with `dotnet run --no-launch-profile --urls http://localhost:5158` stopped immediately with `Database connection string is not configured.` — the same message as a missing secret, although `dotnet user-secrets list` showed the connection string.
+**Fix**: Start it with the environment set: `ASPNETCORE_ENVIRONMENT=Development dotnet run --project StudyHub.API --no-launch-profile --urls ...`. The application then started, logged `AI provider in use: FakeAiService.` and served every M8 request.
+**Why**: User secrets are only added to configuration in the Development environment, and `--no-launch-profile` discards the profile that sets it, so the environment silently became Production. A configuration value is not "set" in the abstract: it is set *for one environment*, and skipping the launch profile skips everything the profile was providing.
 
 ---
 

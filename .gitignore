@@ -4,3 +4,5 @@ obj/
 *.user
 studyhub-source.txt
 export-source.ps1
+.claude/
+CLAUDE.md

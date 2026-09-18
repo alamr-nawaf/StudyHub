@@ -44,18 +44,11 @@ public sealed class User : AuditableEntity
         };
     }
 
-    // استهلاك التوكنات — العدّاد وفحص الحدّ في مكان واحد لا يمكن تجاوزه
-    public void ConsumeTokens(int amount)
-    {
-        if (amount <= 0)
-            throw new ArgumentException("Token amount must be positive.");
-
-        if (TokensUsedThisMonth + amount > MonthlyTokenQuota)
-            throw new InvalidOperationException("Monthly token quota exceeded.");
-
-        TokensUsedThisMonth += amount;
-        UpdatedAt = DateTime.UtcNow;
-    }
+    // The rule only, asked before every paid call (ADR-24). It changes nothing and
+    // throws nothing: the spending itself is recorded in SQL, so that two parallel
+    // operations cannot lose an increment and neither can fail on its accounting (ADR-37)
+    public bool HasQuotaFor(int estimatedTokens)
+        => TokensUsedThisMonth + estimatedTokens <= MonthlyTokenQuota;
 
     // إعادة التعيين إذا دخلنا شهرًا جديدًا. الوقت يأتي من الخارج ليكون الاختبار ممكنًا.
     public void ResetQuotaIfNeeded(DateTime utcNow)

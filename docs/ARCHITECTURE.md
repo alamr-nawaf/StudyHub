@@ -12,7 +12,7 @@
 
 ## 1. What Is This Project
 
-StudyHub is a backend API for managing courses, notes, and tasks, with AI-suggested tasks extracted from raw notes — suggestions the user approves before anything is written *(M8)*.
+StudyHub is a backend API for managing courses, notes, and tasks, with AI summaries of notes and AI-suggested tasks extracted from them — suggestions the user approves before anything is written.
 
 It is a **personal learning project**. The goal is to practise professional .NET backend patterns correctly — Clean Architecture, CQRS, rich domain models, real schema constraints, and a disciplined verification habit — not to ship the fastest possible MVP.
 
@@ -141,6 +141,10 @@ Login and refresh issue them; `JwtBearer` validates them on every request that i
 
 
 Tokens are written with `JsonWebTokenHandler` — the handler `JwtBearer` has used to read them since ASP.NET Core 8. `System.IdentityModel.Tokens.Jwt` is the previous generation of the same library, and writing with one handler while reading with the other is a known source of claim-name surprises (Requirements ADR-29, §9.1).
+
+### AI provider — plain HTTP through `Microsoft.Extensions.Http`
+
+Gemini is called over its REST API with a typed `HttpClient` from `IHttpClientFactory`, and parsed with `System.Text.Json`. No provider SDK is taken: the request is one POST with a prompt, the response is one JSON document, and an SDK would add a dependency and its release cadence to save a few lines. The factory is taken, because a `HttpClient` per request exhausts sockets and caches DNS for the life of the process. See §4.6 for the boundary this sits behind (Requirements ADR-35).
 
 ### Concurrency — PostgreSQL `xmin`
 
@@ -328,8 +332,8 @@ graph TD
     G --> N["NotFoundException → 404"]
     G --> C["ConflictException → 409<br/>duplicate, full parent, lost race"]
     G --> I["InvalidCredentialsException → 401<br/>login and refresh only"]
-    G --> Q["QuotaExceededException → 429 (M8)"]
-    G --> X["ExternalServiceException → 502 (M8)"]
+    G --> Q["QuotaExceededException → 429"]
+    G --> X["ExternalServiceException → 502"]
     G --> S["anything else → 500<br/>no internal detail leaked"]
 ```
 
@@ -343,31 +347,42 @@ Every response is RFC 9457 `ProblemDetails`. Expected exceptions are logged as w
 
 **Two different sources produce 400.** Model binding inside `[ApiController]` rejects malformed JSON *before* MediatR runs, and its response carries a `traceId`. A validator's `ValidationException` does not. That difference is the fastest way to tell a bad payload from a broken rule.
 
-### 4.6 The AI flow — planned (UC-06, M8)
+### 4.6 The AI flow (UC-06, UC-07)
+
+Two operations on a note the user already saved, one paid call each (ADR-38):
 
 ```mermaid
 graph LR
-    N["POST /api/notes/{id}/extract-tasks"] --> D{"note at<br/>max depth?"}
+    N["POST /api/notes/{id}/summarize<br/>POST /api/notes/{id}/extract-tasks"] --> D{"extraction, and the<br/>note at max depth?"}
     D -->|yes| R1["409"]
     D -->|no| Q{"quota left<br/>for the estimate?"}
     Q -->|no| R2["429"]
-    Q -->|yes| AI["AI provider<br/>suggests tasks"]
-    AI -->|fails| R3["502"]
-    AI --> L["RecordTokenUsage<br/>+ AiUsageLog, one save"]
-    L --> S["200 + suggestions<br/>nothing else written"]
-    S --> U["user approves one"]
+    Q -->|yes| AI["AI provider answers"]
+    AI -->|"fails, nothing billed"| R3["502"]
+    AI -->|"unreadable, billed"| L
+    AI --> L["atomic increment<br/>+ AiUsageLog, one transaction"]
+    L --> S["200 + summary or suggestions<br/>nothing else written"]
+    S --> U["user approves a suggestion"]
     U --> T["POST /api/tasks<br/>parent = the note"]
 ```
 
+**The provider boundary is one interface and one class.** Application declares `IAiService` with one method per operation — "summarize this note", "extract tasks from this note", never "complete this prompt". Everything Gemini knows about — the route, the key, the two prompts, the request and response JSON, and the `usageMetadata` field the token count is read from — lives inside `GeminiAiService` in Infrastructure. A second provider is therefore a second class and one line in `AddInfrastructureServices` (ADR-35). Both failure modes leave that class as `ExternalServiceException`, an Application type, for the same reason `PostgresException` never leaves the persistence code.
+
+**The call goes through a typed `HttpClient` from `IHttpClientFactory`**, with the base address, the explicit timeout and the API-key header configured where the client is registered. A client constructed per request exhausts sockets and caches DNS for the life of the process, and the 100-second default timeout is the absence of a decision rather than one (§15.3).
+
+**A reasoning model is assumed, not hoped against.** Such a model spends part of the output budget on thinking, and returns that thinking as extra response parts marked `thought`. Reading `parts[0].text` would therefore hand the model's reasoning back as if it were the answer, and when the budget is exhausted *while* thinking the provider returns a candidate with no answer parts at all — occasionally with no `content` object either. So every step of the walk down the response is optional, thought parts are skipped, and the remaining text is concatenated. How much a model may think is passed straight through from `Ai:ThinkingBudget` and `Ai:ThinkingLevel` and never invented: a model that does not know those fields refuses the entire request, so with both unset the request carries no thinking configuration at all.
+
+**A failed first call has to be diagnosable.** A refusal logs its status *and* the first 500 characters of the body, which is where the provider names an unknown model or a rejected field; an unusable answer logs `finishReason`, and `MAX_TOKENS` logs the one sentence that identifies the cause — the budget ran out before the answer began. All of it at Warning, and none of it in the response body, which must never say which provider is behind the endpoint (§15.3).
+
+**Without a key there is a fake provider, chosen once at startup.** `Ai:ApiKey` decides which implementation is registered, and the choice is logged by class name at startup. `FakeAiService` answers deterministically from the note itself, so both endpoints, the quota arithmetic and the 502 path can be exercised with no key, no network and no cost — and `Ai:FakeFailure` makes it fail on demand. It is never a fallback after a failed real call: a silent downgrade would make a broken provider look like a working one (ADR-35).
+
 **Provenance is parenthood.** An approved task is simply a child of its source note. The old schema had a dedicated `Tasks.SourceNoteId` column; the tree makes it unnecessary.
 
-**Human in the loop, with no endpoint of its own** (ADR-28). Extraction returns suggestions and writes nothing but the usage record. Approval is the existing `POST /api/tasks`.
+**Human in the loop, with no endpoint of its own** (ADR-28). Extraction returns suggestions and writes nothing but the usage record. Approval is the existing `POST /api/tasks`. A summary is returned the same way and never stored: the client keeps it with `PATCH /api/items/{id}` or `POST /api/notes`, or pays again.
 
-**Usage is recorded where it is paid, not where it is used.** An earlier version of this flow recorded tokens after the user approved — a user who never approved would have extracted for free. The record now follows the provider call directly, and never throws (ADR-24).
+**Usage is recorded where it is paid, not where it is used.** An earlier version of this flow recorded tokens after the user approved — a user who never approved would have extracted for free. The record now follows the provider call directly, and never throws (ADR-24). A response that arrived but could not be read is recorded before the client is given its 502 (§15.3).
 
-**The counter and the log move together** — inside one method on `User`, `RecordTokenUsage`, which replaces `ConsumeTokens` in M8 — or the fast quota check and the detailed history drift apart (ADR-16). How the counter survives two parallel extractions is still open (Requirements §13).
-
-**The provider** — Gemini is the current candidate, not yet a recorded decision (Requirements §13, question 1).
+**The counter and the log move together** (ADR-16), in one transaction: an atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n` plus the `AiUsageLog` row. The increment is computed by PostgreSQL from the stored value, so two parallel operations cannot lose one, and no concurrency token, retry or migration is needed (ADR-37). What `ConsumeTokens` used to do is now split in two: `User.HasQuotaFor` asks the rule, and this write records the spending.
 
 ---
 
@@ -534,6 +549,12 @@ cd ..
 #    Once the startup log says the administrator was created:
 #      dotnet user-secrets remove "AdminSeed:Password"
 
+# 3c. Optional — the AI provider. Without a key the application starts with the fake
+#     provider and both AI endpoints work offline; the startup log names which one is live
+#      dotnet user-secrets set "Ai:ApiKey" "<the provider key>"
+#      dotnet user-secrets set "Ai:Model" "<the model name>"
+#    Everything else under "Ai" is non-secret and lives in appsettings.json
+
 # 4. Set the environment variable for design-time commands (per terminal session)
 #    PowerShell:  $env:STUDYHUB_DB_CONNECTION = "Host=localhost;..."
 #    cmd.exe:     set "STUDYHUB_DB_CONNECTION=Host=localhost;..."
@@ -584,9 +605,6 @@ Documented on purpose. A learning project is more useful when its gaps are visib
 - **The administrator seed password sits in user-secrets** until the operator removes it after the first start (Requirements §9.4).
 - **Registration reveals whether an email is in use** — an accepted risk that also undermines login's anti-enumeration rules (Requirements §9.4).
 - **Course ownership is guarded in one layer only** (§6).
-
-### Functionality
-- **`DefaultMonthlyTokenQuota` is a constant** in `RegisterUserCommandHandler` rather than configuration. It moves to configuration in M8.
 
 ### Design limits
 - **Node moving is not supported.** Three other decisions — stored depth, inherited `CourseId`, and the absence of cycle detection — are safe *only* because of this. Adding moving invalidates all three at once.

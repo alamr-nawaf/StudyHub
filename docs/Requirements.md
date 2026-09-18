@@ -136,6 +136,7 @@ C# / .NET 10 with **zero external dependencies**. No EF Core, no ASP.NET Core. T
 - Fluent API only (`IEntityTypeConfiguration<T>`); no Data Annotations on domain entities.
 - **BCrypt.Net-Next** for password hashing, `Enhanced*` variants only.
 - **`Microsoft.IdentityModel.JsonWebTokens`** (`JsonWebTokenHandler`) for token generation (ADR-29) — not `System.IdentityModel.Tokens.Jwt`, the previous generation of the same library.
+- **`Microsoft.Extensions.Http`** for the typed `HttpClient` the AI provider is called through. A client created per request exhausts sockets under load and caches DNS for the life of the process; `IHttpClientFactory` is the documented way to avoid both, and it is where the explicit timeout (§15.3) is configured. **No provider SDK is added**: the call is plain HTTP and `System.Text.Json` (ADR-35).
 - Implements every interface declared in Application.
 
 ### API — `StudyHub.API`
@@ -183,13 +184,17 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | **25** | **`DeletedAt` + `DeletedBatchId` replace `IsDeleted` — deferred** | Correct restore needs to distinguish an item deleted deliberately from one deleted by cascade. A shared batch id per delete operation answers that in one column | A migration, a query-filter change, a `MarkAsDeleted` signature change, and every test asserting `IsDeleted`. The project is not deployed, so no real data will ever make this change expensive; it is deferred rather than scheduled. |
 | **26** | **AI extraction is refused with 409 when the source note sits at maximum depth** | Approved tasks become children of their source note; a child of a depth-4 note is depth 5, which the entity rejects — so every suggestion would be impossible to approve. Refusing before the external call spends nothing | A user cannot extract from a deeply nested note at all. The alternative — creating the tasks as siblings — would silently break the provenance that is UC-06's entire justification |
 | **27** | **Optimistic concurrency on rotation: PostgreSQL's `xmin` is the concurrency token of `RefreshTokens`** | Rotation reads a row and writes it back. Without a check, two parallel refreshes with one token both succeed and fork the chain into two valid ones, and reuse detection never fires. `xmin` is maintained by PostgreSQL itself, so no column is added; it is mapped in Infrastructure as a shadow property, so no Domain type gains a persistence field | A legitimate client that refreshes twice in parallel loses one request (409) and must serialize its refreshes. No grace window (§12) |
-| **28** | **Extraction returns suggestions; nothing is written until the user approves** *(M8)* | AI output enters the user's tree only through a human decision. Approval needs no endpoint of its own: the client creates each approved task through `POST /api/tasks` with the note as parent. Usage is recorded at extraction time, so approving nothing still costs quota | Once created, an extracted task is indistinguishable from a hand-written one. Suggestions are not stored: a client that loses them pays again to extract again |
+| **28** | **Extraction returns suggestions; nothing is written until the user approves** | AI output enters the user's tree only through a human decision. Approval needs no endpoint of its own: the client creates each approved task through `POST /api/tasks` with the note as parent. Usage is recorded at extraction time, so approving nothing still costs quota | Once created, an extracted task is indistinguishable from a hand-written one. Suggestions are not stored: a client that loses them pays again to extract again |
 | **29** | **Tokens are generated with `Microsoft.IdentityModel.JsonWebTokens`, not `System.IdentityModel.Tokens.Jwt`** | The latter is the previous generation of the same library, and ASP.NET Core 8+ validates bearer tokens with `JsonWebTokenHandler` by default. Writing and reading tokens with the same handler removes one source of claim-name mismatches (§9.1) | Most tutorials still show `JwtSecurityTokenHandler`; their examples need translating |
 | **30** | **A handler asks the entity before acting; the entity re-checks the same question** | The rule is written once, in the Domain, and enforced twice with two meanings. In the handler it is an expected refusal and becomes a precise 4xx; in the entity it is an invariant that protects every other caller. Ownership already follows this shape (§6) | A handler that forgets to ask returns 500 instead of 409 — the data stays safe, only the status is wrong. Every handler that nests items must ask |
 | **31** | **One `Role` column on `Users`; permissions are code — constants plus a role-to-permissions map in Domain** | Three designs were costed. Full RBAC tables (`Roles`, `Permissions`, `UserRoles`, `RolePermissions`) means four tables, seed data, two joins on every check and eventually an admin screen to edit what never changes — all to tell two roles apart. ASP.NET Core Identity brings its own `DbContext`, its own user entity and its own migrations, so the rich `User` here is either replaced or duplicated and the domain rules move into a library this project does not own. A column plus a code map costs neither. **Permissions in code live in `git` history: reviewed, diffed and tested. A permissions table editable in production is the shortest path to a silent privilege escalation** | Changing what a role may do needs a deployment, not an `UPDATE`. One user cannot hold two roles. A third role needs a migration, because `CK_User_RoleValue` fixes the range. Adding a *capability* to an existing role does not: one constant, one line in the map, one attribute on the endpoint. The Domain carries permission strings that ASP.NET Core consumes as policy names — plain `string`, no dependency, so the zero-dependency rule (§4) holds |
 | **32** | **Read queries go through read-side interfaces that return DTOs (`ICourseQueries`, `IItemQueries`, `IUserQueries`); repositories stay write-side** | Queries must project with `Select` inside Infrastructure (ADR-13, §6). Keeping reads out of the repositories leaves each repository about loading entities for commands, and each query interface about shaping responses | One more interface and implementation per area. The EF projections are not covered by unit tests, because handlers mock the interface; until M10 the proof of a query is calling its endpoint |
 | **33** | **Reading another user's resource returns 403, the same as writing it** | The write path already reveals existence through its 403, so a 404 on reads alone would hide nothing; one rule for both paths is simpler | A caller can tell that an id exists |
 | **34** | **`GET /api/courses` returns no item counts** | No client needs them yet, and a count per course is easy to write as an N+1 | A client that wants counts reads the course tree. Counts are added when a consumer asks for them (A16) |
+| **35** | **One provider behind one use-case interface (`IAiService`), plus a fake implementation chosen at startup when no API key is configured** | The Application layer asks for "a summary of this note" or "tasks from this note", not for "a completion". The prompt, the HTTP details, the JSON shape and the token count are provider knowledge and stay in Infrastructure, so a second provider is a second class and one DI line. The fake keeps the feature, its tests and its failure paths runnable with no key, no network and no cost | A new AI operation means a new method on the interface. The fake never proves the real provider works: only a real call does |
+| **36** | **The pre-call quota estimate is `characters / CharsPerToken + ResponseReserveTokens`, from configuration** | The check must happen before the call (ADR-24) and the real cost is known only after it. Input length is free to measure and roughly proportional to tokens; a fixed reserve alone would either block short notes or ignore long ones | It is an approximation. A note whose real cost exceeds the estimate overshoots the quota by the gap, which ADR-24 already accepts |
+| **37** | **Token usage is recorded with one atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n`, in the same transaction as the `AiUsageLog` row** | Two parallel operations must not lose an increment, and a call that has been paid for must never fail on its accounting (§14.4). An atomic increment cannot lose one and cannot conflict, so it needs no concurrency token, no retry and no migration | The increment is written in SQL instead of through a method on `User`, so `ConsumeTokens` is replaced by `HasQuotaFor` (the rule) plus this write (the record). A quota reset landing at the same instant as an increment, at a month boundary, can still overwrite it — a race of one row per month, accepted |
+| **38** | **Summarizing and extracting tasks are two endpoints, not one call returning both** | The user picks one of them for a reason: a summary is text to read, a task is a checkbox to tick, and they appear in different places in any client. Charging for both when the user asked for one is waste, and a response with a filled half and an empty half is a shape no client wants | Two prompts, two result types and two handlers that repeat the same §15 order. `AiUsageLog.OperationType` is what tells the two apart in the record |
 
 ---
 
@@ -207,8 +212,10 @@ StudyHub.Application/
 │   │                   ITokenService returns
 │   │                   ICourseQueries, IItemQueries, IUserQueries —
 │   │                   the read side, returning DTOs (ADR-32)
-│   │                   IAiService                                      (M8)
+│   │                   IAiService, IAiUsageRecorder
 │   ├── Behaviors/    → ValidationBehavior.cs
+│   ├── Settings/     → AiSettings.cs, UserQuotaSettings.cs — plain records
+│   │                   bound and validated at startup in Infrastructure
 │   ├── Pagination/   → PagedResult.cs, Paging.cs (§14.2)
 │   ├── Validation/   → PasswordRuleExtensions.cs — the password policy,
 │   │                   shared by registration and administrator seeding
@@ -218,7 +225,7 @@ StudyHub.Application/
 │                       ForbiddenException.cs
 │                       InvalidCredentialsException.cs
 │                       QuotaExceededException.cs,
-│                       ExternalServiceException.cs                     (M8)
+│                       ExternalServiceException.cs
 │
 ├── Auth/Commands/{Login, Refresh, Logout}/
 ├── Auth/Queries/GetCurrentUser/
@@ -226,7 +233,7 @@ StudyHub.Application/
 ├── Courses/Commands/{CreateCourse, DeleteCourse, UpdateCourse}/
 ├── Courses/Queries/{GetCourses, GetCourseTree}/
 ├── Notes/Commands/CreateNote/
-├── Notes/Commands/ExtractTaskSuggestions/                              (M8)
+├── Notes/Commands/{SummarizeNote, ExtractTaskSuggestions}/
 ├── Tasks/Commands/{CreateTask, UpdateTaskStatus, UpdateTaskSchedule}/
 ├── Items/                  → ItemDto.cs, ItemMappings.cs
 ├── Items/Commands/{DeleteItem, UpdateItemContent}/
@@ -372,6 +379,8 @@ Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a compo
 | GET | `/api/items/{id}/tree` | user | 200 + flat list of `ItemDto`, the item first (ADR-23); 404, 403 |
 | PATCH | `/api/items/{id}` | user | 204; 400, 404, 403. Never changes `Kind` (rule 3.2.8) |
 | DELETE | `/api/items/{id}` | user | 204 |
+| POST | `/api/notes/{id}/summarize` | user | 200 + `{ summary, tokensUsed }`; 403, 404, 429, 502. Empty body; nothing is stored (§15) |
+| POST | `/api/notes/{id}/extract-tasks` | user | 200 + `{ suggestions, tokensUsed }`; 403, 404, **409**, 429, 502. Empty body; nothing is created (ADR-28) |
 | PATCH | `/api/admin/users/{id}/deactivate` | `users:deactivate` permission² | 204 |
 
 Deletion, reading and content edits have one route for both notes and tasks, because those operations do not distinguish them. Status and schedule live under `/api/tasks`, because only a task has them.
@@ -399,12 +408,7 @@ Deletion, reading and content edits have one route for both notes and tasks, bec
 
 `expiresIn` is the access token's remaining lifetime in **seconds**, so the client never has to parse the JWT to schedule a refresh. No user profile fields are included (ADR-21); a client needing them calls `GET /api/auth/me`.
 
-### Planned — M8
-| Method | Route | Auth | Returns |
-|---|---|---|---|
-| POST | `/api/notes/{id}/extract-tasks` | user | 200 + suggestions; nothing is created (ADR-28) |
-
-Approval uses the existing `POST /api/tasks`, with `parentItemId` set to the note.
+**The two AI endpoints take an empty body**: the note is named by the route and its text is already stored. They are separate calls and separate charges, and a request never does both (ADR-38). 409 belongs to extraction alone — a summary creates nothing, so the depth guard does not apply to it (ADR-26). Approval of a suggestion uses the existing `POST /api/tasks`, with `parentItemId` set to the note.
 
 ### Planned — M9
 `GET /api/dashboard` — contents defined in §15.4.
@@ -554,8 +558,8 @@ The path of an authorized request: login issues the `role` claim → `[Authorize
 | **M5.1** | **Cleanup**: exception file split, `Infrastructure.Tests` with the `D4` and `D5` proofs, `Email.FromPersisted`, UTC rule, depth refused with 409 (ADR-30) | ✅ |
 | **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ✅ |
 | **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ✅ |
-| M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | In progress |
-| M8 | AI integration & quota enforcement (UC-06, UC-07): suggestion endpoint with user approval (ADR-28), `ConsumeTokens` split, counter concurrency (§13), failure model, extraction depth guard, quota to configuration | Pending |
+| M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | ✅ |
+| M8 | AI integration & quota enforcement (UC-06, UC-07): the summarize and extract-tasks endpoints behind one `IAiService` with a fake provider (ADR-35, ADR-38), user approval (ADR-28), the `ConsumeTokens` split into `HasQuotaFor` plus the atomic record (ADR-36, ADR-37), failure model, extraction depth guard, quota to configuration | In progress |
 | M9 | Dashboard aggregation (UC-08) as defined in §15.4 | Pending |
 | M10 | Integration tests, rate limiting, refresh-token cleanup, API containerization | Pending |
 
@@ -596,14 +600,9 @@ Each of these is a decision, not an oversight.
 
 ## 13. Open Questions
 
-Closed since v2.0: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate**. The authentication questions are answered in §9.1; the registration message is an accepted risk (§9.4); `DeletedAt` is deferred (ADR-25); pagination, tree shape, and concurrency are settled in §14; the approval flow and quota ordering in §15. Three M7 questions are closed as well: item counts on `GET /api/courses` (question 3, ADR-34), where a read query projects (question 4, ADR-32), and reading another user's resource (question 7, ADR-33).
+Closed since v2.0: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate**. The authentication questions are answered in §9.1; the registration message is an accepted risk (§9.4); `DeletedAt` is deferred (ADR-25); pagination, tree shape, and concurrency are settled in §14; the approval flow and quota ordering in §15. Three M7 questions are closed as well: item counts on `GET /api/courses` (question 3, ADR-34), where a read query projects (question 4, ADR-32), and reading another user's resource (question 7, ADR-33). Three M8 questions are closed too: the provider and its abstraction (question 1, ADR-35), the estimated cost per operation (question 2, ADR-36), and how the token counter survives concurrent operations (question 5, ADR-37).
 
-Still open. None blocks M7; each names the milestone that needs the answer. The remaining questions keep their original numbers, because other text refers to them by number:
-
-1. **AI provider and its abstraction** (M8) — which provider (Gemini is the current candidate, named in `ARCHITECTURE.md` §4.6), and is a single `IAiService` enough, or should the prompt and response contract be modelled explicitly?
-2. **Estimated cost per AI operation** (M8, §15.1) — a fixed reserve per operation type, or a multiple of the input length? The second is more accurate and needs a tokenizer.
-
-**5.** **How does the token counter survive concurrent extractions?** (M8, §14.4) It must neither lose an increment nor fail a paid call. Either an atomic `UPDATE … SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n` — never conflicts, but bypasses `RecordTokenUsage` and needs its own transaction with the log insert — or optimistic concurrency with a retry — keeps the domain method, but needs a reload-and-retry path in Infrastructure.
+Still open. None blocks M8; each names the milestone that needs the answer. The remaining questions keep their original numbers, because other text refers to them by number:
 
 **6.** **What does "recent courses" mean?** (M9, §15.4) As defined, the most recently created or edited. Ordering by the latest item activity is truer to the word, at the cost of one aggregate per course.
 
@@ -672,7 +671,7 @@ The response wraps the items:
 | Row | The race | Decision |
 |---|---|---|
 | A refresh token during rotation (M6) | two refreshes with one token fork the chain | `xmin` concurrency token; the loser gets 409 (ADR-27) |
-| `Users.TokensUsedThisMonth` (M8) | two extractions lose one increment | must neither lose it nor fail a paid call; mechanism open (§13) |
+| `Users.TokensUsedThisMonth` | two AI operations lose one increment | one atomic `UPDATE … SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n`, in the same transaction as the `AiUsageLog` row (ADR-37) |
 | Courses and items | two tabs edit the same row | last write wins; deferred (§12) |
 
 **Choosing the loser's fate.** A conflict the client can resolve becomes a 409. A conflict on the record of something already paid for is resolved on the server and never surfaced.
@@ -683,21 +682,32 @@ The response wraps the items:
 
 `UC-06` and `UC-07` are two sentences, and behind them is the milestone most likely to break — because the ordering problem below is not visible from the use case text at all.
 
-**The flow** *(M8, ADR-28)*: one paid request, then approvals that cost nothing.
+**Two operations, two endpoints, one paid call each** *(M8, ADR-28, ADR-38)*. On a note they already saved, the user chooses either a summary or task suggestions. A request never does both, and neither of them stores its result.
+
+**The shared order.** Both endpoints run the same steps, and only step 2 differs:
 
 ```
-POST /api/notes/{id}/extract-tasks
-  1. load the note                          → 404 / 403
-  2. note.IsAtMaxDepth                      → 409      (§15.2)
+POST /api/notes/{id}/summarize        POST /api/notes/{id}/extract-tasks
+  1. load the note                      → 404 (missing, or not a note) / 403
+  2. —                                   note.IsAtMaxDepth  → 409   (§15.2)
   3. user.ResetQuotaIfNeeded(utcNow)
-  4. user.HasQuotaFor(estimate) is false    → 429      (§15.1)
-  5. call the provider; it fails            → 502      (§15.3)
-  6. user.RecordTokenUsage(actual) + AiUsageLog, one save
-  7. return the suggestions; nothing else is written
+  4. user.HasQuotaFor(estimate) is false                    → 429   (§15.1)
+  5. call the provider; it fails                            → 502   (§15.3)
+  6. record the tokens + AiUsageLog, one transaction               (§15.1)
+  7. return the result; nothing else is written
+```
 
-then, for each suggestion the user approves:
+**Step 2 belongs to extraction alone.** The depth guard exists because an approved task becomes a child of its source note (§15.2); summarizing creates nothing, so a note at maximum depth is summarized normally.
+
+**The summary is returned, never stored.** Keeping it is the client's choice: it writes the text back onto the note with `PATCH /api/items/{id}`, or saves it as a new note with `POST /api/notes`. The API stores no summary of its own, so a client that discards one pays again to get it back.
+
+**Suggestions are returned, never created** (ADR-28). For each suggestion the user approves:
+
+```
 POST /api/tasks  { "title": "…", "parentItemId": "<note id>" }
 ```
+
+The two operations are told apart in the record by `AiUsageLog.OperationType`.
 
 A suggestion carries a title and optional content, and no due date: "by Friday" cannot become a UTC moment without the user's timezone, which the API neither stores nor asks for (§14.1). The user sets the date while approving.
 
@@ -715,9 +725,9 @@ The money is spent and the result is thrown away by an accounting rule. **The ch
 
 1. **Before the call**: `user.HasQuotaFor(estimatedCost)`. If false, throw `QuotaExceededException` → 429. Nothing external is invoked.
 2. **The call.**
-3. **After the call**: `user.RecordTokenUsage(actual)` — **never throws**, even if `actual` exceeds what remained. Writes the `AiUsageLog` row in the same transaction (ADR-16).
+3. **After the call**: the tokens are recorded with one atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n` (ADR-37), written together with the `AiUsageLog` row in one transaction (ADR-16). The record **never throws**, even if the actual cost exceeds what remained.
 
-`ConsumeTokens` is replaced by these two. The split is the point: a *question* about quota and a *record* of spending are different operations, and merging them is what created the trap.
+`ConsumeTokens` is replaced by these two: `User.HasQuotaFor(estimate)` in Domain is the rule, and the atomic increment in Infrastructure is the record. The split is the point: a *question* about quota and a *record* of spending are different operations, and merging them is what created the trap. The record is SQL rather than a method on `User` because two parallel operations must not lose an increment and must not fail on their accounting (§14.4, ADR-37).
 
 **Cost accepted**: the counter may overshoot the quota by the gap between estimate and actual — once per request that passes the pre-check, and parallel requests all pass it before any of them records. The next `HasQuotaFor` after them sees the real figure and refuses. A hard cap that could discard paid work is worse than a soft cap that cannot. Recording itself must not lose an increment under concurrency (§14.4).
 
@@ -743,6 +753,8 @@ Nothing originating outside the process reaches the client as a 500.
 | Source note at maximum depth | `ConflictException` | 409 |
 
 **A billed call is recorded even when its result is unusable.** A response that arrived but could not be parsed has still been paid for: its usage is recorded and saved first, and only then does the client get the 502. A call that produced no response has no token count to record; that loss is accepted.
+
+**A reasoning model can be billed for an answer it never gave.** It spends part of the output budget thinking, so a budget sized for the answer alone is consumed before the answer starts: the provider then returns `finishReason: MAX_TOKENS` with no answer parts, and charges for the thinking. That is the "arrived but unusable" row above — the usage is recorded and the client gets 502. The same model returns its thinking as extra response parts, which are skipped rather than returned as the summary. How much it may think is configuration passed straight to the provider (`Ai:ThinkingBudget`, `Ai:ThinkingLevel`), never a value this code invents, because a model that does not know the field refuses the whole request.
 
 **No automatic retry.** A retry on a call that has already been billed doubles the cost to fix a failure that may not be transient. If a retry policy is ever added, it applies only to failures that are provably pre-billing — a connection refused, not a timeout after the request was accepted.
 

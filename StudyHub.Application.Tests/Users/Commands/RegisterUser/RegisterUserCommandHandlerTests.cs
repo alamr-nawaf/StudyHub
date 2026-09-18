@@ -2,6 +2,7 @@
 using Moq;
 using StudyHub.Application.Common.Exceptions;
 using StudyHub.Application.Common.Interfaces;
+using StudyHub.Application.Common.Settings;
 using StudyHub.Application.Users.Commands.RegisterUser;
 using StudyHub.Domain.Entities;
 
@@ -9,6 +10,8 @@ namespace StudyHub.Application.Tests.Users.Commands.RegisterUser;
 
 public class RegisterUserCommandHandlerTests
 {
+    private static readonly UserQuotaSettings QuotaSettings = new(DefaultMonthlyTokens: 100_000);
+
     private readonly Mock<IUserRepository> _userRepositoryMock = new();
     private readonly Mock<IPasswordHasher> _passwordHasherMock = new();
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
@@ -19,7 +22,8 @@ public class RegisterUserCommandHandlerTests
         _handler = new RegisterUserCommandHandler(
             _userRepositoryMock.Object,
             _passwordHasherMock.Object,
-            _unitOfWorkMock.Object);
+            _unitOfWorkMock.Object,
+            QuotaSettings);
     }
 
     [Fact]
@@ -47,6 +51,21 @@ public class RegisterUserCommandHandlerTests
         _unitOfWorkMock.Verify(
             u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_WithNewEmail_ShouldGiveTheAccountTheConfiguredMonthlyQuota()
+    {
+        var command = new RegisterUserCommand("Ahmed Ali", "ahmed@test.com", "Password123", "Password123");
+
+        User? added = null;
+        _userRepositoryMock.Setup(r => r.Add(It.IsAny<User>())).Callback<User>(u => added = u);
+        _passwordHasherMock.Setup(h => h.Hash(command.Password)).Returns("hashed-password");
+
+        await _handler.Handle(command, CancellationToken.None);
+
+        added.Should().NotBeNull();
+        added!.MonthlyTokenQuota.Should().Be(QuotaSettings.DefaultMonthlyTokens);
     }
 
     [Fact]

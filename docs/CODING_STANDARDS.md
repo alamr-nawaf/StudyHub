@@ -62,7 +62,9 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Value objects for rules that would otherwise be duplicated.** `Email` exists because normalization was written in two layers, and a divergence there defeats a unique index (A9). Value objects are `record` types with private constructors and a static `Create`. A value object read back from the database is rebuilt through a non-validating `FromPersisted`, called only by the EF Core converter — a converter is a mapping, not a gate (Requirements §3.3).
 
-**Exception messages are English; comments are Arabic.** Messages reach the client and the logs; comments explain intent to the author. Comments state *why*, never *what* — the code already says what.
+**Exception messages are English, and so are comments in code written from M8 onwards.** Messages reach the client and the logs; comments explain intent to the author. Comments state *why*, never *what* — the code already says what.
+
+**Arabic comments written before M8 stay as they are and are not translated.** A translation pass would touch every file in the repository, produce a diff in which no behaviour changed, and bury the commits that do change behaviour. The language of a comment is not a defect; a comment that has drifted from its code is.
 
 Every class, record and interface starts with a short English `/// <summary>` that says what it is for. Classes written before M7 keep their existing comments.
 
@@ -70,7 +72,7 @@ Every class, record and interface starts with a short English `/// <summary>` th
 
 ## 5. API & Error Handling
 
-**RESTful compliance**: standard verbs and status codes — 200 OK, 201 Created, 204 No Content, 400, 401, 403, 404, 409, and 429 and 502 *(M8)*.
+**RESTful compliance**: standard verbs and status codes — 200 OK, 201 Created, 204 No Content, 400, 401, 403, 404, 409, 429 and 502.
 
 **Controllers are thin.** An action builds a command, sends it through MediatR, and maps the result. Three to five lines, always. No business logic, and no skipping a layer to reach Infrastructure directly.
 
@@ -85,8 +87,8 @@ Every class, record and interface starts with a short English `/// <summary>` th
 | `ForbiddenException` | 403 |
 | `NotFoundException` | 404 |
 | `ConflictException` | 409 — duplicate email, parent at maximum depth, lost concurrency race |
-| `QuotaExceededException` *(M8)* | 429 |
-| `ExternalServiceException` *(M8)* | 502 |
+| `QuotaExceededException` | 429 |
+| `ExternalServiceException` | 502 |
 | anything else | 500, with no internal detail in the response |
 
 **400 is shape; 403, 404 and 409 are state.** Validators throw the first; handlers throw the rest. A handler never throws `ValidationException` (Requirements §8).

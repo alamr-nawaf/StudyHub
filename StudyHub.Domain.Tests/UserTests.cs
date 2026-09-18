@@ -9,6 +9,16 @@ public class UserTests
     private static User CreateSut(int quota = 100)
         => User.Create("Ahmed Ali", "Ahmed@Test.COM", "hash", quota);
 
+    // The counter is written only by the atomic UPDATE in Infrastructure (ADR-37),
+    // so a user who has already spent is built the way EF Core builds one when it
+    // reads the row back: straight into the private setter.
+    private static User WithTokensUsed(int used, int quota = 100)
+    {
+        var user = CreateSut(quota);
+        typeof(User).GetProperty(nameof(User.TokensUsedThisMonth))!.SetValue(user, used);
+        return user;
+    }
+
     [Fact]
     public void Create_WithMixedCaseEmail_ShouldNormalizeToLowercase()
     {
@@ -26,30 +36,51 @@ public class UserTests
     }
 
     [Fact]
-    public void ConsumeTokens_WithinQuota_ShouldIncreaseCounter()
+    public void HasQuotaFor_EstimateReachingExactlyTheQuota_ShouldReturnTrue()
     {
-        var user = CreateSut(quota: 100);
+        var user = WithTokensUsed(used: 30, quota: 100);
 
-        user.ConsumeTokens(30);
+        var hasQuota = user.HasQuotaFor(70);
+
+        hasQuota.Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasQuotaFor_EstimateOneTokenOverTheQuota_ShouldReturnFalse()
+    {
+        var user = WithTokensUsed(used: 30, quota: 100);
+
+        var hasQuota = user.HasQuotaFor(71);
+
+        hasQuota.Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasQuotaFor_AskedTwice_ShouldNotChangeTheCounter()
+    {
+        var user = WithTokensUsed(used: 30, quota: 100);
+
+        user.HasQuotaFor(70);
+        user.HasQuotaFor(500);
 
         user.TokensUsedThisMonth.Should().Be(30);
     }
 
     [Fact]
-    public void ConsumeTokens_ExceedingQuota_ShouldThrowInvalidOperationException()
+    public void HasQuotaFor_AfterAResetIntoANewMonth_ShouldReturnTrueAgain()
     {
-        var user = CreateSut(quota: 100);
+        var user = WithTokensUsed(used: 100, quota: 100);
+        user.HasQuotaFor(1).Should().BeFalse();
 
-        var act = () => user.ConsumeTokens(101);
+        user.ResetQuotaIfNeeded(DateTime.UtcNow.AddMonths(1));
 
-        act.Should().Throw<InvalidOperationException>();
+        user.HasQuotaFor(100).Should().BeTrue();
     }
 
     [Fact]
     public void ResetQuotaIfNeeded_InSameMonth_ShouldKeepCounter()
     {
-        var user = CreateSut();
-        user.ConsumeTokens(50);
+        var user = WithTokensUsed(used: 50);
 
         user.ResetQuotaIfNeeded(DateTime.UtcNow);
 
@@ -59,8 +90,7 @@ public class UserTests
     [Fact]
     public void ResetQuotaIfNeeded_InNewMonth_ShouldResetCounter()
     {
-        var user = CreateSut();
-        user.ConsumeTokens(50);
+        var user = WithTokensUsed(used: 50);
 
         user.ResetQuotaIfNeeded(DateTime.UtcNow.AddMonths(1));
 

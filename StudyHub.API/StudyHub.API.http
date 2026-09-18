@@ -515,3 +515,78 @@ Content-Type: application/json
 Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "dueDate": null }
+
+### M8-1. A note with a body to work on — expected: 201
+# @name m8note
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{
+  "title": "موضوع الثقوب السوداء",
+  "content": "تعتبر الثقوب السوداء من أعظم الأسرار الكونية، وهي مناطق تتمتع بجاذبية هائلة تبتلع كل ما يقترب منها حتى الضوء، حيث تتكون هذه الظاهرة غالباً عندما تنهار النجوم الضخمة على نفسها في نهاية دورة حياتها لتشكل نقطة ذات كثافة لا نهائية، ورغم استحالة رؤيتها بشكل مباشر، يدرك العلماء وجودها عبر مراقبة تأثير جاذبيتها الشديدة على النجوم والغازات المحيطة بها."
+}
+
+### M8-2. Summarize the note — expected: 200 with summary and tokensUsed
+# @name m8summary
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-3. Extract task suggestions — expected: 200 with suggestions and tokensUsed
+# @name m8suggestions
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-4. Approve one suggestion — expected: 201. Nothing was created until this call (ADR-28)
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{
+  "title": "{{m8suggestions.response.body.$.suggestions[0].title}}",
+  "content": "{{m8suggestions.response.body.$.suggestions[0].content}}",
+  "parentItemId": "{{m8note.response.body.$.noteId}}"
+}
+
+### M8-5. The counter grew by what was recorded — expected: 200, tokensUsedThisMonth above zero
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-6. A task's id on a note's route — expected: 404
+POST {{baseUrl}}/api/notes/{{m7task.response.body.$.taskId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-7. A task's id on the extraction route — expected: 404
+POST {{baseUrl}}/api/notes/{{m7task.response.body.$.taskId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-8. Another user's note, summarize — expected: 403 (ADR-33)
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### M8-9. Another user's note, extract — expected: 403
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### M8-10. Extract from a note at depth 4 — expected: 409 (ADR-26). Send D0…D4 above first
+POST {{baseUrl}}/api/notes/{{note4.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-11. Summarize the same depth-4 note — expected: 200. A summary creates nothing
+POST {{baseUrl}}/api/notes/{{note4.response.body.$.noteId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-12. Quota too small — expected: 429.
+# Raise Ai:ResponseReserveTokens in appsettings.Development.json above what this user has
+# left, restart the API, send this once, then put the value back.
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-13. Provider failure — expected: 502, and nothing recorded.
+# Set Ai:FakeFailure to true in appsettings.Development.json, restart the API, send this
+# once, then put it back to false.
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-14. Without a token — expected: 401
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize

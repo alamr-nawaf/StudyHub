@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Moq;
 using StudyHub.Application.Common.Interfaces;
+using StudyHub.Application.Common.Settings;
 using StudyHub.Application.Users.Commands.SeedAdministrator;
 using StudyHub.Domain.Entities;
 using StudyHub.Domain.Enums;
@@ -9,6 +10,8 @@ namespace StudyHub.Application.Tests.Users.Commands.SeedAdministrator;
 
 public class SeedAdministratorCommandHandlerTests
 {
+    private static readonly UserQuotaSettings QuotaSettings = new(DefaultMonthlyTokens: 100_000);
+
     private const string AdminEmail = "admin@test.com";
 
     private readonly Mock<IUserRepository> _userRepositoryMock = new();
@@ -23,7 +26,8 @@ public class SeedAdministratorCommandHandlerTests
         _handler = new SeedAdministratorCommandHandler(
             _userRepositoryMock.Object,
             _passwordHasherMock.Object,
-            _unitOfWorkMock.Object);
+            _unitOfWorkMock.Object,
+            QuotaSettings);
     }
 
     private void StoredUserIs(User? user) =>

@@ -69,6 +69,14 @@ var app = builder.Build();
 
 await app.SeedAdministratorAsync();
 
+// Which provider answers the AI endpoints is a configuration decision taken at startup,
+// so it is stated at startup — by class name, never by key (§14.3)
+using (var aiScope = app.Services.CreateScope())
+{
+    var aiService = aiScope.ServiceProvider.GetRequiredService<IAiService>();
+    app.Logger.LogInformation("AI provider in use: {Provider}.", aiService.GetType().Name);
+}
+
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())

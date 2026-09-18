@@ -1,6 +1,6 @@
 using MediatR;
 using StudyHub.Application.Common.Interfaces;
-using StudyHub.Application.Users.Commands.RegisterUser;
+using StudyHub.Application.Common.Settings;
 using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Users.Commands.SeedAdministrator;
@@ -14,15 +14,18 @@ public class SeedAdministratorCommandHandler
     private readonly IUserRepository _userRepository;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly UserQuotaSettings _quotaSettings;
 
     public SeedAdministratorCommandHandler(
         IUserRepository userRepository,
         IPasswordHasher passwordHasher,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        UserQuotaSettings quotaSettings)
     {
         _userRepository = userRepository;
         _passwordHasher = passwordHasher;
         _unitOfWork = unitOfWork;
+        _quotaSettings = quotaSettings;
     }
 
     public async Task<SeedAdministratorResult> Handle(
@@ -43,7 +46,7 @@ public class SeedAdministratorCommandHandler
                 request.FullName,
                 request.Email,
                 _passwordHasher.Hash(request.Password),
-                RegisterUserCommandHandler.DefaultMonthlyTokenQuota);
+                _quotaSettings.DefaultMonthlyTokens);
 
             _userRepository.Add(user);
         }

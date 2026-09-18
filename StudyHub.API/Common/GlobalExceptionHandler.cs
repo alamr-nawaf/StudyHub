@@ -39,6 +39,10 @@ namespace StudyHub.API.Common
                 NotFoundException => (StatusCodes.Status404NotFound, "Not found"),
                 ForbiddenException => (StatusCodes.Status403Forbidden, "Forbidden"),
                 InvalidCredentialsException => (StatusCodes.Status401Unauthorized, "Unauthorized"),
+                QuotaExceededException => (StatusCodes.Status429TooManyRequests, "Quota exceeded"),
+                // 502, not 500: the failure is outside this process, and its message is
+                // deliberately generic because it is written into the body (§15.3)
+                ExternalServiceException => (StatusCodes.Status502BadGateway, "Upstream service failed"),
                 _ => (StatusCodes.Status500InternalServerError, "Server error")
             };
 
