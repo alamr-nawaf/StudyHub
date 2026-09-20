@@ -1,6 +1,7 @@
 using MediatR;
 using StudyHub.Application.Common.Exceptions;
 using StudyHub.Application.Common.Interfaces;
+using StudyHub.Application.Common.Time;
 
 namespace StudyHub.Application.Auth.Queries.GetCurrentUser;
 
@@ -11,19 +12,26 @@ public class GetCurrentUserQueryHandler : IRequestHandler<GetCurrentUserQuery, C
 {
     private readonly IUserQueries _userQueries;
     private readonly ICurrentUserService _currentUser;
+    private readonly BusinessCalendar _calendar;
 
-    public GetCurrentUserQueryHandler(IUserQueries userQueries, ICurrentUserService currentUser)
+    public GetCurrentUserQueryHandler(
+        IUserQueries userQueries, ICurrentUserService currentUser, BusinessCalendar calendar)
     {
         _userQueries = userQueries;
         _currentUser = currentUser;
+        _calendar = calendar;
     }
 
     public async Task<CurrentUserDto> Handle(GetCurrentUserQuery request, CancellationToken cancellationToken)
     {
         var userId = _currentUser.UserId;
 
+        // The same month boundary the quota check uses, so /me shows what the next
+        // AI call will be measured against (ADR-39, ADR-40)
+        var monthStartUtc = _calendar.MonthStartUtc(DateTime.UtcNow);
+
         // توكن صالح لمستخدم لا صفّ له: نادر، لكنه 404 صادق لا 500
-        return await _userQueries.GetCurrentAsync(userId, cancellationToken)
+        return await _userQueries.GetCurrentAsync(userId, monthStartUtc, cancellationToken)
             ?? throw new NotFoundException($"User '{userId}' was not found.");
     }
 }

@@ -3,8 +3,8 @@ using Moq;
 using StudyHub.Application.Common.Exceptions;
 using StudyHub.Application.Common.Interfaces;
 using StudyHub.Application.Common.Settings;
+using StudyHub.Application.Common.Time;
 using StudyHub.Application.Notes.Commands.SummarizeNote;
-using StudyHub.Application.Tests.Common;
 using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Tests.Notes.Commands.SummarizeNote;
@@ -22,15 +22,19 @@ public class SummarizeNoteCommandHandlerTests
         ResponseReserveTokens: 10,
         MaxSuggestions: 5);
 
+    // Riyadh observes no daylight saving, so a fixed UTC+3 zone is exact and keeps the
+    // tests independent of the machine's time-zone database
+    private static readonly BusinessCalendar Calendar = new(
+        TimeZoneInfo.CreateCustomTimeZone("Test/Riyadh", TimeSpan.FromHours(3), "Riyadh", "Riyadh"));
+
     private readonly Mock<IItemRepository> _itemRepositoryMock = new();
     private readonly Mock<IUserRepository> _userRepositoryMock = new();
     private readonly Mock<ICurrentUserService> _currentUserMock = new();
-    private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly Mock<IAiService> _aiServiceMock = new();
-    private readonly Mock<IAiUsageRecorder> _usageRecorderMock = new();
+    private readonly Mock<IAiUsageLedger> _usageLedgerMock = new();
     private readonly SummarizeNoteCommandHandler _handler;
 
-    private User _user = PersistedUser.With(quota: 1_000, tokensUsed: 0);
+    private User _user = User.Create("Quota Owner", "quota@test.com", "hash", 1_000);
 
     public SummarizeNoteCommandHandlerTests()
     {
@@ -44,10 +48,10 @@ public class SummarizeNoteCommandHandlerTests
             _itemRepositoryMock.Object,
             _userRepositoryMock.Object,
             _currentUserMock.Object,
-            _unitOfWorkMock.Object,
             _aiServiceMock.Object,
-            _usageRecorderMock.Object,
-            Settings);
+            _usageLedgerMock.Object,
+            Settings,
+            Calendar);
     }
 
     private void CurrentUserIs(User user)
@@ -87,7 +91,7 @@ public class SummarizeNoteCommandHandlerTests
             Times.Never);
 
     private void VerifyNothingWasRecorded()
-        => _usageRecorderMock.Verify(
+        => _usageLedgerMock.Verify(
             r => r.RecordAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
@@ -99,7 +103,7 @@ public class SummarizeNoteCommandHandlerTests
         var result = await _handler.Handle(new SummarizeNoteCommand(note.Id), CancellationToken.None);
 
         result.Should().Be(new AiSummaryResult("A short summary.", 120));
-        _usageRecorderMock.Verify(
+        _usageLedgerMock.Verify(
             r => r.RecordAsync(_user.Id, "Summarize", 120, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -122,7 +126,6 @@ public class SummarizeNoteCommandHandlerTests
         await act.Should().ThrowAsync<NotFoundException>();
         VerifyProviderWasNeverCalled();
         VerifyNothingWasRecorded();
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -135,7 +138,6 @@ public class SummarizeNoteCommandHandlerTests
         await act.Should().ThrowAsync<NotFoundException>();
         VerifyProviderWasNeverCalled();
         VerifyNothingWasRecorded();
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -148,13 +150,15 @@ public class SummarizeNoteCommandHandlerTests
         await act.Should().ThrowAsync<ForbiddenException>();
         VerifyProviderWasNeverCalled();
         VerifyNothingWasRecorded();
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task Handle_QuotaTooSmallForTheEstimate_ShouldThrowQuotaExceededWithoutCallingTheProvider()
     {
-        CurrentUserIs(PersistedUser.With(quota: 20, tokensUsed: 19));
+        CurrentUserIs(User.Create("Quota Owner", "quota@test.com", "hash", 20));
+        _usageLedgerMock
+            .Setup(l => l.SumTokensSinceAsync(_user.Id, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(19);
         var note = StoredNote();
 
         var act = () => _handler.Handle(new SummarizeNoteCommand(note.Id), CancellationToken.None);
@@ -165,28 +169,23 @@ public class SummarizeNoteCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_NewMonth_ShouldResetTheQuotaBeforeCheckingIt()
-    {
-        // Spent to the last token last month: without the reset this call is refused
-        CurrentUserIs(PersistedUser.With(
-            quota: 20, tokensUsed: 20, lastReset: DateTime.UtcNow.AddMonths(-1)));
-        var note = StoredNote();
-
-        var result = await _handler.Handle(new SummarizeNoteCommand(note.Id), CancellationToken.None);
-
-        result.TokensUsed.Should().Be(120);
-        _user.TokensUsedThisMonth.Should().Be(0);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task Handle_SameMonth_ShouldNotSaveTheUnchangedUser()
+    public async Task Handle_Always_ShouldSumUsageFromTheStartOfTheRiyadhMonth()
     {
         var note = StoredNote();
+        DateTime? askedSince = null;
+        _usageLedgerMock
+            .Setup(l => l.SumTokensSinceAsync(_user.Id, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, DateTime, CancellationToken>((_, since, _) => askedSince = since)
+            .ReturnsAsync(0);
+        var before = DateTime.UtcNow;
 
         await _handler.Handle(new SummarizeNoteCommand(note.Id), CancellationToken.None);
 
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        // Either side of the call, in case the test runs across a Riyadh month boundary
+        var after = DateTime.UtcNow;
+        askedSince.Should().NotBeNull();
+        askedSince!.Value.Kind.Should().Be(DateTimeKind.Utc);
+        askedSince.Value.Should().BeOneOf(Calendar.MonthStartUtc(before), Calendar.MonthStartUtc(after));
     }
 
     [Fact]
@@ -214,7 +213,7 @@ public class SummarizeNoteCommandHandlerTests
         var act = () => _handler.Handle(new SummarizeNoteCommand(note.Id), CancellationToken.None);
 
         await act.Should().ThrowAsync<ExternalServiceException>();
-        _usageRecorderMock.Verify(
+        _usageLedgerMock.Verify(
             r => r.RecordAsync(_user.Id, "Summarize", 77, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

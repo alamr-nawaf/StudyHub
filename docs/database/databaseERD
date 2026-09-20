@@ -16,8 +16,6 @@ erDiagram
         string Email UK "150, normalized lowercase"
         string PasswordHash "BCrypt enhanced"
         int MonthlyTokenQuota
-        int TokensUsedThisMonth
-        datetime LastTokenResetDate
         bool IsActive
         datetime CreatedAt
         datetime UpdatedAt "nullable"

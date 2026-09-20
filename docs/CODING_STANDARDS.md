@@ -27,9 +27,9 @@ Rules for writing code in this repository. Where a rule exists because something
 
 **Asynchronous programming**: all I/O-bound operations are fully asynchronous, suffixed `Async`, and always take a `CancellationToken` — including inside pipeline behaviours, which run on every single request.
 
-**Time as a parameter**: a method whose behaviour depends on the current time takes `utcNow` as an argument (`ResetQuotaIfNeeded(DateTime utcNow)`, `RefreshToken.IsActive(DateTime utcNow)`). Methods that merely stamp `UpdatedAt` read `DateTime.UtcNow` directly. Do not inject a clock abstraction across every entity to buy testability nobody uses.
+**Time as a parameter**: a method whose behaviour depends on the current time takes `utcNow` as an argument (`RefreshToken.IsActive(DateTime utcNow)`, `BusinessCalendar.MonthStartUtc(DateTime utcNow)`). Methods that merely stamp `UpdatedAt` read `DateTime.UtcNow` directly. Do not inject a clock abstraction across every entity to buy testability nobody uses.
 
-**UTC only.** Every timestamp is UTC. The validator of any command that carries a `DateTime` rejects a value whose `Kind` is not `Utc` — Npgsql refuses to write anything else, and the alternative to a 400 is a 500 (Requirements §14.1).
+**UTC only.** Every timestamp is UTC. The validator of any command that carries a `DateTime` rejects a value whose `Kind` is not `Utc` — Npgsql refuses to write anything else, and the alternative to a 400 is a 500 (Requirements §14.1). Business periods — which month, which day — come from `BusinessCalendar`, never from `utcNow.Month` or `utcNow.Date` (ADR-40).
 
 ---
 

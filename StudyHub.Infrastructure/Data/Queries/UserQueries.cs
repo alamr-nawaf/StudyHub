@@ -13,7 +13,8 @@ public class UserQueries : IUserQueries
 
     public UserQueries(StudyHubDbContext context) => _context = context;
 
-    public async Task<CurrentUserDto?> GetCurrentAsync(Guid userId, CancellationToken cancellationToken)
+    public async Task<CurrentUserDto?> GetCurrentAsync(
+        Guid userId, DateTime monthStartUtc, CancellationToken cancellationToken)
     {
         // Email يُسقَط كائنًا كاملًا عبر المحوّل، ويُقرأ Value بعد وصوله للذاكرة:
         // EF لا يعرف أعضاء كائن القيمة، فلا ترجمة لـ Email.Value داخل الاستعلام (D6)
@@ -26,7 +27,12 @@ public class UserQueries : IUserQueries
                 u.Email,
                 u.Role,
                 u.MonthlyTokenQuota,
-                u.TokensUsedThisMonth
+                // A correlated sub-sum inside the same SELECT: one statement per request,
+                // and the month's usage is read from the log it is recorded in (ADR-39).
+                // int? because SUM over no rows is NULL
+                TokensUsedThisMonth = _context.AiUsageLogs
+                    .Where(l => l.UserId == u.Id && l.CreatedAt >= monthStartUtc)
+                    .Sum(l => (int?)l.TokensConsumed) ?? 0
             })
             .FirstOrDefaultAsync(cancellationToken);
 

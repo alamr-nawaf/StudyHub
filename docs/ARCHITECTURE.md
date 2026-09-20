@@ -74,7 +74,7 @@ The base class is split because a usage log is not an editable entity. Giving it
 
 **Value object**: `Email` owns normalization and format checking. It exists because that logic was previously written twice — in `User.Create` and in `UserRepository` — and a divergence between the two would let a duplicate account walk straight past a unique index. The EF Core converter rebuilds it through `Email.FromPersisted`, which does not validate — a converter is a mapping, not a gate, and one corrupt row must not turn every read of that user into a 500 (Requirements §3.3).
 
-**Clock handling**: methods whose behaviour depends on time (`User.ResetQuotaIfNeeded`, `RefreshToken.IsActive`, `RefreshToken.Revoke`) take `utcNow` as a parameter, so they are testable with no clock abstraction. Everything else reads `DateTime.UtcNow` directly. This is a deliberate limit: a full `TimeProvider` injection across every entity would touch every call site and every test to buy testability in places nobody tests.
+**Clock handling**: methods whose behaviour depends on time (`RefreshToken.IsActive`, `RefreshToken.Revoke`) take `utcNow` as a parameter, so they are testable with no clock abstraction. Everything else reads `DateTime.UtcNow` directly. A *period* is a separate question: which month an instant belongs to is answered by `BusinessCalendar` in Application, which converts a UTC instant into the configured business time zone (`BusinessTime:TimeZoneId`, Asia/Riyadh) and back, so a month begins at Riyadh midnight while everything stored and exchanged stays UTC (ADR-40). This is a deliberate limit: a full `TimeProvider` injection across every entity would touch every call site and every test to buy testability in places nobody tests.
 
 **Why zero dependencies**: persistence ignorance. The business rules can be unit-tested with no infrastructure at all, and would survive a change of database or framework.
 
@@ -360,7 +360,7 @@ graph LR
     Q -->|yes| AI["AI provider answers"]
     AI -->|"fails, nothing billed"| R3["502"]
     AI -->|"unreadable, billed"| L
-    AI --> L["atomic increment<br/>+ AiUsageLog, one transaction"]
+    AI --> L["insert the AiUsageLog row"]
     L --> S["200 + summary or suggestions<br/>nothing else written"]
     S --> U["user approves a suggestion"]
     U --> T["POST /api/tasks<br/>parent = the note"]
@@ -382,7 +382,7 @@ graph LR
 
 **Usage is recorded where it is paid, not where it is used.** An earlier version of this flow recorded tokens after the user approved — a user who never approved would have extracted for free. The record now follows the provider call directly, and never throws (ADR-24). A response that arrived but could not be read is recorded before the client is given its 502 (§15.3).
 
-**The counter and the log move together** (ADR-16), in one transaction: an atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n` plus the `AiUsageLog` row. The increment is computed by PostgreSQL from the stored value, so two parallel operations cannot lose one, and no concurrency token, retry or migration is needed (ADR-37). What `ConsumeTokens` used to do is now split in two: `User.HasQuotaFor` asks the rule, and this write records the spending.
+**The log is the only record of usage** (ADR-39). Until M8.1 a counter on `Users` was incremented in the same transaction as the `AiUsageLog` row, and it was reset lazily by the user's next AI call — so `GET /api/auth/me` reported last month's figure until that call, and the lazy reset raced the increment at the month boundary. The counter was a cached copy of a table that was already stored and indexed, so it was removed: a user's monthly usage is now the sum of their `AiUsageLogs` rows since the start of the month, recording is one insert that parallel operations can neither lose nor collide on, and there is nothing to reset. The month itself starts at midnight in Riyadh, not at UTC midnight three hours later (ADR-40). The rule and the record stay separate: `User.HasQuotaFor(used, estimate)` in Domain answers the question, and the inserted row is the record (ADR-24, Requirements §15.1).
 
 ---
 

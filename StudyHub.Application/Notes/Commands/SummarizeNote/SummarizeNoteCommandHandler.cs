@@ -2,6 +2,7 @@ using MediatR;
 using StudyHub.Application.Common.Exceptions;
 using StudyHub.Application.Common.Interfaces;
 using StudyHub.Application.Common.Settings;
+using StudyHub.Application.Common.Time;
 using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Notes.Commands.SummarizeNote;
@@ -19,27 +20,27 @@ public class SummarizeNoteCommandHandler : IRequestHandler<SummarizeNoteCommand,
     private readonly IItemRepository _itemRepository;
     private readonly IUserRepository _userRepository;
     private readonly ICurrentUserService _currentUser;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly IAiService _aiService;
-    private readonly IAiUsageRecorder _usageRecorder;
+    private readonly IAiUsageLedger _usageLedger;
     private readonly AiSettings _aiSettings;
+    private readonly BusinessCalendar _calendar;
 
     public SummarizeNoteCommandHandler(
         IItemRepository itemRepository,
         IUserRepository userRepository,
         ICurrentUserService currentUser,
-        IUnitOfWork unitOfWork,
         IAiService aiService,
-        IAiUsageRecorder usageRecorder,
-        AiSettings aiSettings)
+        IAiUsageLedger usageLedger,
+        AiSettings aiSettings,
+        BusinessCalendar calendar)
     {
         _itemRepository = itemRepository;
         _userRepository = userRepository;
         _currentUser = currentUser;
-        _unitOfWork = unitOfWork;
         _aiService = aiService;
-        _usageRecorder = usageRecorder;
+        _usageLedger = usageLedger;
         _aiSettings = aiSettings;
+        _calendar = calendar;
     }
 
     public async Task<AiSummaryResult> Handle(
@@ -55,17 +56,14 @@ public class SummarizeNoteCommandHandler : IRequestHandler<SummarizeNoteCommand,
         var user = await _userRepository.GetByIdAsync(_currentUser.UserId, cancellationToken)
             ?? throw new NotFoundException("The account of the current user no longer exists.");
 
-        // Before the check, or a user entering a new month is refused against last
-        // month's counter (§15.1)
-        var lastReset = user.LastTokenResetDate;
-        user.ResetQuotaIfNeeded(DateTime.UtcNow);
-
-        if (user.LastTokenResetDate != lastReset)
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // The log is the only record of spending, and the month starts at Riyadh midnight,
+        // so a new month needs no reset: it simply has no rows yet (ADR-39, ADR-40)
+        var used = await _usageLedger.SumTokensSinceAsync(
+            user.Id, _calendar.MonthStartUtc(DateTime.UtcNow), cancellationToken);
 
         var estimate = _aiSettings.EstimateTokens(note.Title, note.Content);
 
-        if (!user.HasQuotaFor(estimate))
+        if (!user.HasQuotaFor(used, estimate))
             throw new QuotaExceededException("Your monthly AI token quota is exhausted.");
 
         AiSummaryResult result;
@@ -78,12 +76,12 @@ public class SummarizeNoteCommandHandler : IRequestHandler<SummarizeNoteCommand,
         {
             // The answer is unusable but it has been paid for: record it, then let the
             // client have its 502 (§15.3)
-            await _usageRecorder.RecordAsync(
+            await _usageLedger.RecordAsync(
                 user.Id, OperationType, exception.TokensBilled, cancellationToken);
             throw;
         }
 
-        await _usageRecorder.RecordAsync(user.Id, OperationType, result.TokensUsed, cancellationToken);
+        await _usageLedger.RecordAsync(user.Id, OperationType, result.TokensUsed, cancellationToken);
 
         return result;
     }

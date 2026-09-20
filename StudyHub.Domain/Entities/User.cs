@@ -13,8 +13,6 @@ public sealed class User : AuditableEntity
 
     public string PasswordHash { get; private set; } = string.Empty;
     public int MonthlyTokenQuota { get; private set; }
-    public int TokensUsedThisMonth { get; private set; }
-    public DateTime LastTokenResetDate { get; private set; }
     public bool IsActive { get; private set; }
     public UserRole Role { get; private set; }
 
@@ -37,30 +35,16 @@ public sealed class User : AuditableEntity
             Email = Email.Create(email),   // التطبيع والتحقق في مكان واحد
             PasswordHash = passwordHash,
             MonthlyTokenQuota = monthlyQuota,
-            TokensUsedThisMonth = 0,
-            LastTokenResetDate = DateTime.UtcNow,
             IsActive = true,
              Role = UserRole.User
         };
     }
 
     // The rule only, asked before every paid call (ADR-24). It changes nothing and
-    // throws nothing: the spending itself is recorded in SQL, so that two parallel
-    // operations cannot lose an increment and neither can fail on its accounting (ADR-37)
-    public bool HasQuotaFor(int estimatedTokens)
-        => TokensUsedThisMonth + estimatedTokens <= MonthlyTokenQuota;
-
-    // إعادة التعيين إذا دخلنا شهرًا جديدًا. الوقت يأتي من الخارج ليكون الاختبار ممكنًا.
-    public void ResetQuotaIfNeeded(DateTime utcNow)
-    {
-        if (utcNow.Year == LastTokenResetDate.Year &&
-            utcNow.Month == LastTokenResetDate.Month)
-            return;
-
-        TokensUsedThisMonth = 0;
-        LastTokenResetDate = utcNow;
-        UpdatedAt = utcNow;
-    }
+    // throws nothing: the month's usage is summed from AiUsageLogs by the caller, because
+    // the log is the only record of spending and User keeps no copy of it (ADR-39)
+    public bool HasQuotaFor(int tokensUsedThisMonth, int estimatedTokens)
+        => tokensUsedThisMonth + estimatedTokens <= MonthlyTokenQuota;
 
     public void Deactivate()
     {

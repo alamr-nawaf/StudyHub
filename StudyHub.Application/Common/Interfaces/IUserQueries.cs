@@ -7,5 +7,6 @@ namespace StudyHub.Application.Common.Interfaces;
 /// </summary>
 public interface IUserQueries
 {
-    Task<CurrentUserDto?> GetCurrentAsync(Guid userId, CancellationToken cancellationToken);
+    // monthStartUtc bounds the usage sum: the caller decides where the month begins (ADR-40)
+    Task<CurrentUserDto?> GetCurrentAsync(Guid userId, DateTime monthStartUtc, CancellationToken cancellationToken);
 }

@@ -51,7 +51,7 @@ This is a **personal learning project**. The explicit goal is to practise profes
 
 > **UC-06 makes the approval explicit (v3.0).** `ARCHITECTURE.md` §4.6 already settled "human in the loop", while v2.0's wording — "extracted tasks are created" — read as if tasks were written automatically. Approval needs no endpoint of its own: the client creates each approved task through the existing `POST /api/tasks`. See §15 and ADR-28.
 
-> **UC-07 clarifies v1.1.** The old text said "daily/monthly" while the code has only ever implemented a monthly quota (`MonthlyTokenQuota`, `TokensUsedThisMonth`, `LastTokenResetDate`). Monthly is the decision.
+> **UC-07 clarifies v1.1.** The old text said "daily/monthly" while the code has only ever implemented a monthly quota (`MonthlyTokenQuota` on `Users`; since M8.1 the usage itself is summed from `AiUsageLogs` rather than stored, ADR-39). Monthly is the decision.
 
 ### Data Aggregation
 - **UC-08**: As a frontend application, I can fetch a full user dashboard from a single optimized endpoint, with no N+1 queries. The dashboard's exact contents are defined in §15.4 — a use case whose output is not enumerable cannot be finished, only extended.
@@ -96,7 +96,7 @@ Entities are rich: private setters, private constructors, static factory methods
 
 | Entity | Behaviour |
 |---|---|
-| `User` | `Create`, `ConsumeTokens`, `ResetQuotaIfNeeded`, `Deactivate`, `ChangePassword`; `PromoteToAdmin`, `Can(permission)` |
+| `User` | `Create`, `HasQuotaFor(used, estimate)`, `Deactivate`, `ChangePassword`; `PromoteToAdmin`, `Can(permission)` |
 | `Course` | `Create`, `UpdateDetails`, `MarkAsDeleted` |
 | `Item` (abstract) | `Initialize` (protected), `UpdateContent`, `MarkAsDeleted`; `IsAtMaxDepth` (read-only query, ADR-30) |
 | `Note : Item` | `Create` |
@@ -104,7 +104,7 @@ Entities are rich: private setters, private constructors, static factory methods
 | `RefreshToken` | `Create`, `IsActive(utcNow)`, `Revoke(utcNow, replacedBy)` |
 | `AiUsageLog` | `Create` (write-once; no mutators by design) |
 
-> **`User.ConsumeTokens` changes in M8.** It currently throws when the quota would be exceeded. That is correct for a pre-check and wrong for post-call accounting, because throwing after a paid external call discards a result that has already been paid for. It will be split into a non-mutating `HasQuotaFor(estimate)` and a `RecordTokenUsage(actual)` that never throws. See §15.1 and ADR-24. Its existing tests change with it.
+> **The quota rule has been rewritten twice.** Before M8, `User.ConsumeTokens` checked and recorded in one method, and threw after a call that had already been paid for. M8 split it into `HasQuotaFor` plus an atomic counter increment. M8.1 removed the counter itself: `HasQuotaFor(used, estimate)` receives the month's usage, summed from `AiUsageLogs`, and the record is one inserted row (ADR-24, ADR-39).
 
 **A rule the handler must ask about is published as a query.** When a handler has to refuse a request that the entity would also refuse, the entity exposes the rule as a read-only member — `IsAtMaxDepth`. The handler asks it and returns a precise 4xx; the mutator asks the same member and throws. The rule is written once and enforced twice. If the mutator's check ever fires, a handler skipped the question: that is a bug, and 500 is the honest answer (ADR-30).
 
@@ -116,7 +116,7 @@ Entities are rich: private setters, private constructors, static factory methods
 
 **Two ways to build an `Email`, and the difference is deliberate.** `Email.Create` validates and is used at every entry point. `Email.FromPersisted` does not validate and is used only by the EF Core value converter when reading a row. A converter is a mapping, not a gate: if it validated, a single corrupt row would turn every read of that user — including the login lookup — into a 500 instead of a rejected credential. This is the same failure shape as `D4`, in a different place, and the same trust EF Core already extends to entities, which it materializes without calling their factories. **Cost**: `FromPersisted` has to be public, because the converter lives in Infrastructure, so any caller can skip validation; its name is the only guard.
 
-**Time as a parameter**: methods whose behaviour depends on the clock (`ResetQuotaIfNeeded`, `RefreshToken.IsActive`, `RefreshToken.Revoke`) take the current time as an argument, so they are testable without a clock abstraction. Everything else reads `DateTime.UtcNow` directly — a deliberate limit on how far that pattern is worth pushing.
+**Time as a parameter**: methods whose behaviour depends on the clock (`RefreshToken.IsActive`, `RefreshToken.Revoke`) take the current time as an argument, so they are testable without a clock abstraction. Everything else reads `DateTime.UtcNow` directly — a deliberate limit on how far that pattern is worth pushing.
 
 ---
 
@@ -172,7 +172,7 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | 13 | Repository + Unit of Work over EF Core | Handler tests need no database; the pattern is worth learning | **Technically redundant** — `DbContext` is already a unit of work and `DbSet<T>` already a repository. An extra abstraction layer, and `IQueryable` composition is lost at the boundary — so read queries must project inside Infrastructure, through read-side query interfaces (ADR-32) |
 | 14 | Controllers, not Minimal APIs | Attribute routing, filters, and `[Authorize]` are conventional and well documented | Slightly more ceremony per endpoint |
 | 15 | `IExceptionHandler`, not custom middleware | The modern ASP.NET Core replacement; returns RFC-shaped `ProblemDetails` | — |
-| 16 | Duplicate token accounting: `User.TokensUsedThisMonth` **and** `AiUsageLogs` | The counter answers "is there quota left" in one read; the log answers "what was it spent on" | They must be updated together, inside one method on `User`, or they drift |
+| 16 | Duplicate token accounting: `User.TokensUsedThisMonth` **and** `AiUsageLogs` — **superseded by ADR-39 (M8.1)** | The counter answers "is there quota left" in one read; the log answers "what was it spent on" | They must be updated together, inside one method on `User`, or they drift |
 | 17 | Manual DTO mapping via static extension methods | No extra dependency; explicit | Boilerplate per DTO; swappable for AutoMapper/Mapster later without touching Domain |
 | **18** | **All timestamps are UTC; the API rejects any value that is not** | A `DateTime` with `Kind = Unspecified` is not a moment in time, it is a moment in an unstated timezone. Npgsql writes only `Kind = Utc` to a `timestamptz` column: a value without an offset arrives as `Unspecified`, and one with a non-`Z` offset arrives as `Local`, because the JSON reader converts it to server time. Both throw at save, so the alternative to rejecting them is a 500 | A client sending an unambiguous offset such as `+03:00` is also rejected, even though it could be converted. One rule in every validator that carries a `DateTime`, instead of a conversion nobody can see |
 | **19** | **Multiple concurrent sessions; one rotation chain per device** | A user with a phone and a laptop should not be logged out of one by using the other | Reuse detection revokes *every* chain, so one stolen token logs the user out everywhere. The `RefreshTokens` table grows without bound until cleanup lands in M10 |
@@ -180,7 +180,7 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | **21** | **The JWT carries `sub`, `jti`, `role`, and the standard registered claims — nothing else** | Every claim is a copy of a database row frozen at issue time. `sub` and `role` are the only two worth freezing: the first can never go stale, and the second changes rarely enough that a 15-minute lag is acceptable. Reading the role from the database on every request would remove the reason JWT was chosen (ADR-06) | Any handler needing the name or email reads the database. Deactivating a user does not invalidate an already-issued access token; it takes effect within the access-token lifetime, at most 15 minutes. **A role change carries the same lag, and demotion is the dangerous direction: a revoked administrator keeps administrative rights for that window.** Shortening the window means shortening the access token for everyone |
 | **22** | **Offset pagination (`page`, `pageSize`), default 20, hard maximum 100** | Per-user datasets are small; offset is simpler and permits jumping to a page | Pages shift when rows are inserted or deleted between requests, and deep offsets get slow. Switch to cursor pagination when either becomes visible |
 | **23** | **A subtree is returned as a flat list, not nested JSON** | Projects straight into a DTO with one `Select`, and needs no self-referencing DTO or recursive mapper. Not chosen for pagination — a tree is never paginated (§14.2) | The client assembles the tree from `ParentItemId`. Roughly ten lines of client code |
-| **24** | **Quota is pre-checked against an estimate; usage recording never throws** | An external call that has already been paid for must never have its result discarded by an accounting rule | The hard guarantee "the counter never exceeds the quota" is lost — each request that passes the pre-check may overshoot by the gap between estimate and actual, and parallel requests all pass it before any of them records. Some requests are refused that would have fitted |
+| **24** | **Quota is pre-checked against an estimate; usage recording never throws** | An external call that has already been paid for must never have its result discarded by an accounting rule | The hard guarantee "monthly usage never exceeds the quota" is lost — each request that passes the pre-check may overshoot by the gap between estimate and actual, and parallel requests all pass it before any of them records. Some requests are refused that would have fitted |
 | **25** | **`DeletedAt` + `DeletedBatchId` replace `IsDeleted` — deferred** | Correct restore needs to distinguish an item deleted deliberately from one deleted by cascade. A shared batch id per delete operation answers that in one column | A migration, a query-filter change, a `MarkAsDeleted` signature change, and every test asserting `IsDeleted`. The project is not deployed, so no real data will ever make this change expensive; it is deferred rather than scheduled. |
 | **26** | **AI extraction is refused with 409 when the source note sits at maximum depth** | Approved tasks become children of their source note; a child of a depth-4 note is depth 5, which the entity rejects — so every suggestion would be impossible to approve. Refusing before the external call spends nothing | A user cannot extract from a deeply nested note at all. The alternative — creating the tasks as siblings — would silently break the provenance that is UC-06's entire justification |
 | **27** | **Optimistic concurrency on rotation: PostgreSQL's `xmin` is the concurrency token of `RefreshTokens`** | Rotation reads a row and writes it back. Without a check, two parallel refreshes with one token both succeed and fork the chain into two valid ones, and reuse detection never fires. `xmin` is maintained by PostgreSQL itself, so no column is added; it is mapped in Infrastructure as a shadow property, so no Domain type gains a persistence field | A legitimate client that refreshes twice in parallel loses one request (409) and must serialize its refreshes. No grace window (§12) |
@@ -193,8 +193,10 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | **34** | **`GET /api/courses` returns no item counts** | No client needs them yet, and a count per course is easy to write as an N+1 | A client that wants counts reads the course tree. Counts are added when a consumer asks for them (A16) |
 | **35** | **One provider behind one use-case interface (`IAiService`), plus a fake implementation chosen at startup when no API key is configured** | The Application layer asks for "a summary of this note" or "tasks from this note", not for "a completion". The prompt, the HTTP details, the JSON shape and the token count are provider knowledge and stay in Infrastructure, so a second provider is a second class and one DI line. The fake keeps the feature, its tests and its failure paths runnable with no key, no network and no cost | A new AI operation means a new method on the interface. The fake never proves the real provider works: only a real call does |
 | **36** | **The pre-call quota estimate is `characters / CharsPerToken + ResponseReserveTokens`, from configuration** | The check must happen before the call (ADR-24) and the real cost is known only after it. Input length is free to measure and roughly proportional to tokens; a fixed reserve alone would either block short notes or ignore long ones | It is an approximation. A note whose real cost exceeds the estimate overshoots the quota by the gap, which ADR-24 already accepts |
-| **37** | **Token usage is recorded with one atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n`, in the same transaction as the `AiUsageLog` row** | Two parallel operations must not lose an increment, and a call that has been paid for must never fail on its accounting (§14.4). An atomic increment cannot lose one and cannot conflict, so it needs no concurrency token, no retry and no migration | The increment is written in SQL instead of through a method on `User`, so `ConsumeTokens` is replaced by `HasQuotaFor` (the rule) plus this write (the record). A quota reset landing at the same instant as an increment, at a month boundary, can still overwrite it — a race of one row per month, accepted |
+| **37** | **Token usage is recorded with one atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n`, in the same transaction as the `AiUsageLog` row** — **superseded by ADR-39 (M8.1)** | Two parallel operations must not lose an increment, and a call that has been paid for must never fail on its accounting (§14.4). An atomic increment cannot lose one and cannot conflict, so it needs no concurrency token, no retry and no migration | The increment is written in SQL instead of through a method on `User`, so `ConsumeTokens` is replaced by `HasQuotaFor` (the rule) plus this write (the record). A quota reset landing at the same instant as an increment, at a month boundary, can still overwrite it — a race of one row per month, accepted |
 | **38** | **Summarizing and extracting tasks are two endpoints, not one call returning both** | The user picks one of them for a reason: a summary is text to read, a task is a checkbox to tick, and they appear in different places in any client. Charging for both when the user asked for one is waste, and a response with a filled half and an empty half is a shape no client wants | Two prompts, two result types and two handlers that repeat the same §15 order. `AiUsageLog.OperationType` is what tells the two apart in the record |
+| **39** | **Monthly AI usage is the sum of the month's `AiUsageLogs` rows; `Users` stores no counter** (supersedes ADR-16 and ADR-37) | The counter was a cached copy of the log with an expiry, reset lazily by the user's next AI call. Every reader had to know when it expired, and `GET /api/auth/me` did not, so it showed last month's usage until the first call of a new month; the lazy reset also raced the atomic increment at the month boundary. Summing the log removes the copy: nothing to reset, nothing to go stale, and recording becomes one insert, which parallel operations can neither lose nor collide on. The `(UserId, CreatedAt)` index serves the sum | Every quota check and every `GET /api/auth/me` sums the month's rows instead of reading one column — an index range scan, negligible at per-user scale. A migration drops `TokensUsedThisMonth` and `LastTokenResetDate`, and rolling it back cannot restore their values. The pre-call overshoot of ADR-24 is unchanged |
+| **40** | **Timestamps are stored and exchanged in UTC; business periods are computed in one configured time zone, Asia/Riyadh** | The users are in Riyadh, so "this month" — and, from M9, "today" — must begin at Riyadh midnight, not at UTC midnight three hours later; otherwise the first three hours of a month count toward the previous one. Storage stays UTC because Npgsql writes only UTC to `timestamptz` (ADR-18) and an instant has no time zone — only the question "which month, which day" does. One zone in configuration (`BusinessTime:TimeZoneId`), validated at startup, and one class, `BusinessCalendar`, that answers the question | One zone for every user: a user elsewhere gets Riyadh's months and days. A per-user zone would need a column and a profile field. Clients still send and receive `Z` values, and showing Riyadh time is the client's job |
 
 ---
 
@@ -212,11 +214,12 @@ StudyHub.Application/
 │   │                   ITokenService returns
 │   │                   ICourseQueries, IItemQueries, IUserQueries —
 │   │                   the read side, returning DTOs (ADR-32)
-│   │                   IAiService, IAiUsageRecorder
+│   │                   IAiService, IAiUsageLedger
 │   ├── Behaviors/    → ValidationBehavior.cs
 │   ├── Settings/     → AiSettings.cs, UserQuotaSettings.cs — plain records
 │   │                   bound and validated at startup in Infrastructure
 │   ├── Pagination/   → PagedResult.cs, Paging.cs (§14.2)
+│   ├── Time/         → BusinessCalendar.cs — business periods in the configured time zone (ADR-40)
 │   ├── Validation/   → PasswordRuleExtensions.cs — the password policy,
 │   │                   shared by registration and administrator seeding
 │   │                   PagingRuleExtensions.cs, UtcDateRuleExtensions.cs
@@ -270,13 +273,9 @@ Five tables: `Users`, `Courses`, `Items`, `RefreshTokens`, `AiUsageLogs`.
 | Email | varchar(150) | required, **unique index**; stored as text via a value converter |
 | PasswordHash | text | required |
 | MonthlyTokenQuota | int | |
-| TokensUsedThisMonth | int | |
-| LastTokenResetDate | timestamptz | |
 | IsActive | bool | |
 | Role | int | required, database default `0`; `CK_User_RoleValue` restricts it to `0`–`1` |
 | CreatedAt / UpdatedAt | timestamptz | UpdatedAt nullable |
-
-From M8, concurrent AI requests write `TokensUsedThisMonth`; how an increment survives that is open (§13, §14.4).
 
 `Role` is an integer, not text, for the reason `Kind` is: renaming an enum member must not invalidate stored rows. It carries no index — the column has two distinct values and no query filters on it, so an index here would be write cost with no reader (A13). The check constraint is not optional: presence is not validity, and without it the database accepts any integer the application never wrote (A11).
 
@@ -349,6 +348,8 @@ The hash must be **deterministic** (SHA-256), not BCrypt: every refresh looks th
 | CreatedAt | timestamptz | **no `UpdatedAt`** — write-once |
 
 Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a composite already covers its leading column.
+
+This table is the only record of AI usage. A user's monthly usage is the sum of their rows since the start of the current month in Riyadh (ADR-39, ADR-40); no column elsewhere copies it.
 
 ### Delete behaviours
 `Restrict` everywhere except `RefreshTokens.UserId`, which cascades. Rationale: a session belongs to nobody but its user, while content must never disappear because of an accidental parent delete.
@@ -559,7 +560,8 @@ The path of an authorized request: login issues the `role` claim → `[Authorize
 | **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ✅ |
 | **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ✅ |
 | M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | ✅ |
-| M8 | AI integration & quota enforcement (UC-06, UC-07): the summarize and extract-tasks endpoints behind one `IAiService` with a fake provider (ADR-35, ADR-38), user approval (ADR-28), the `ConsumeTokens` split into `HasQuotaFor` plus the atomic record (ADR-36, ADR-37), failure model, extraction depth guard, quota to configuration | In progress |
+| M8 | AI integration & quota enforcement (UC-06, UC-07): the summarize and extract-tasks endpoints behind one `IAiService` with a fake provider (ADR-35, ADR-38), user approval (ADR-28), the `ConsumeTokens` split into `HasQuotaFor` plus the atomic record (ADR-36, ADR-37 — the record was replaced in M8.1, ADR-39), failure model, extraction depth guard, quota to configuration | ✅ |
+| M8.1 | **Quota from the log**: monthly usage summed from AiUsageLogs instead of a stored counter (ADR-39), business periods in Asia/Riyadh (ADR-40) | In progress |
 | M9 | Dashboard aggregation (UC-08) as defined in §15.4 | Pending |
 | M10 | Integration tests, rate limiting, refresh-token cleanup, API containerization | Pending |
 
@@ -628,7 +630,8 @@ These belong to no single milestone. That is precisely why they were missing fro
 - Validators reject any `DateTime` whose `Kind` is not `Utc` — every validator that carries one, M7's schedule update included.
 - Entities read `DateTime.UtcNow` and never `DateTime.Now`.
 - A due date in the past is **valid**. Recording a task that was due yesterday is a normal thing to do.
-- Timezone presentation is the client's job. The API neither stores nor asks for the user's timezone.
+- Timezone presentation is the client's job. The API neither stores nor asks for the user's timezone; it uses one configured business time zone for periods (ADR-40).
+- Business periods — the quota month, and from M9 the dashboard's days — start at midnight in the configured business time zone, Asia/Riyadh (ADR-40). Storage and transport stay UTC.
 
 **Cost, stated plainly**: a client sending an unambiguous `+03:00` offset gets rejected even though the value could have been converted. Accepting it would route the value through the *server's* local timezone and back — correct, but invisible and hard to verify. One rejected format is cheaper than one invisible conversion.
 
@@ -671,7 +674,7 @@ The response wraps the items:
 | Row | The race | Decision |
 |---|---|---|
 | A refresh token during rotation (M6) | two refreshes with one token fork the chain | `xmin` concurrency token; the loser gets 409 (ADR-27) |
-| `Users.TokensUsedThisMonth` | two AI operations lose one increment | one atomic `UPDATE … SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n`, in the same transaction as the `AiUsageLog` row (ADR-37) |
+| Monthly AI usage | two AI operations record at once | none needed: each inserts its own `AiUsageLogs` row, and inserts neither lose nor collide (ADR-39) |
 | Courses and items | two tabs edit the same row | last write wins; deferred (§12) |
 
 **Choosing the loser's fate.** A conflict the client can resolve becomes a 409. A conflict on the record of something already paid for is resolved on the server and never surfaced.
@@ -690,10 +693,10 @@ The response wraps the items:
 POST /api/notes/{id}/summarize        POST /api/notes/{id}/extract-tasks
   1. load the note                      → 404 (missing, or not a note) / 403
   2. —                                   note.IsAtMaxDepth  → 409   (§15.2)
-  3. user.ResetQuotaIfNeeded(utcNow)
-  4. user.HasQuotaFor(estimate) is false                    → 429   (§15.1)
+  3. sum the month's usage from AiUsageLogs (ADR-39)
+  4. user.HasQuotaFor(used, estimate) is false              → 429   (§15.1)
   5. call the provider; it fails                            → 502   (§15.3)
-  6. record the tokens + AiUsageLog, one transaction               (§15.1)
+  6. insert the AiUsageLog row                                     (§15.1)
   7. return the result; nothing else is written
 ```
 
@@ -713,7 +716,7 @@ A suggestion carries a title and optional content, and no due date: "by Friday" 
 
 ### 15.1 Quota ordering — the problem and the decision
 
-`User.ConsumeTokens` throws when the quota would be exceeded. The natural sequence is:
+Before M8, `User.ConsumeTokens` threw when the quota would be exceeded, and the natural sequence was:
 
 ```
 call the provider → pay → count tokens → ConsumeTokens → throws → result discarded
@@ -723,15 +726,15 @@ The money is spent and the result is thrown away by an accounting rule. **The ch
 
 **Decision (ADR-24)** — three steps, in this order:
 
-1. **Before the call**: `user.HasQuotaFor(estimatedCost)`. If false, throw `QuotaExceededException` → 429. Nothing external is invoked.
+1. **Before the call**: sum the user's `AiUsageLogs` rows since the start of the month in Riyadh (ADR-39, ADR-40), and ask `user.HasQuotaFor(used, estimate)`. If false, throw `QuotaExceededException` → 429. Nothing external is invoked.
 2. **The call.**
-3. **After the call**: the tokens are recorded with one atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n` (ADR-37), written together with the `AiUsageLog` row in one transaction (ADR-16). The record **never throws**, even if the actual cost exceeds what remained.
+3. **After the call**: insert one `AiUsageLog` row with the tokens the provider reported. The record **never throws**, even if the actual cost exceeds what remained.
 
-`ConsumeTokens` is replaced by these two: `User.HasQuotaFor(estimate)` in Domain is the rule, and the atomic increment in Infrastructure is the record. The split is the point: a *question* about quota and a *record* of spending are different operations, and merging them is what created the trap. The record is SQL rather than a method on `User` because two parallel operations must not lose an increment and must not fail on their accounting (§14.4, ADR-37).
+`User.HasQuotaFor` in Domain is the rule; the log row is the record. The split is the point: a *question* about quota and a *record* of spending are different operations, and merging them is what created the trap. An insert cannot lose an increment or collide with a parallel one, so the record needs no transaction, no concurrency token and no retry (§14.4).
 
-**Cost accepted**: the counter may overshoot the quota by the gap between estimate and actual — once per request that passes the pre-check, and parallel requests all pass it before any of them records. The next `HasQuotaFor` after them sees the real figure and refuses. A hard cap that could discard paid work is worse than a soft cap that cannot. Recording itself must not lose an increment under concurrency (§14.4).
+**Cost accepted**: monthly usage may overshoot the quota by the gap between estimate and actual — once per request that passes the pre-check, and parallel requests all pass it before any of them records. The next check sums the real figure and refuses. A hard cap that could discard paid work is worse than a soft cap that cannot.
 
-**Also**: `ResetQuotaIfNeeded(utcNow)` runs before the pre-check, or a user entering a new month is refused against last month's counter.
+**There is no reset.** A new month simply sums rows the previous month did not have.
 
 ### 15.2 Depth and extraction
 

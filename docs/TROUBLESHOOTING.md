@@ -136,6 +136,16 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: Walk every part, skip the ones marked `thought`, concatenate the rest, and treat each step down the response as optional. `finishReason` is logged when an answer cannot be read, with a dedicated message for `MAX_TOKENS`; a non-success status logs the first 500 characters of the body. `Ai:ThinkingBudget` and `Ai:ThinkingLevel` pass a thinking cap through to the provider, and are absent unless configured. Nine tests in `GeminiAiServiceTests` drive real thinking-model payloads through a stub `HttpMessageHandler`.
 **Why**: Code written against one provider response is written against *one example* of it. The shape an external API is allowed to return is wider than the shape it happened to return, and the parts of a response that are optional are exactly the parts that appear first in production. Walk what a contract permits, not what a sample showed.
 
+### A26. A requirements section still described a method the previous milestone had removed (M8.1)
+**Problem**: Found during code review — no runtime error. After M8, Requirements §3.3 still listed `User.ConsumeTokens` and promised a `RecordTokenUsage` method, while the code had `HasQuotaFor` plus an atomic SQL record (ADR-37), and §15.1 of the same document already said so. §7 also still called the counter's concurrency "open".
+**Fix**: Rewrote §3.3, §7 and §15.1 in M8.1, together with the removal of the counter.
+**Why**: A plan lists the sections its author remembered; a search lists the sections that exist. When a milestone removes or renames a member, search every document for the old name before closing the milestone.
+
+### A27. A monthly counter reset lazily showed last month's usage (M8.1)
+**Problem**: Found during code review — no runtime error yet. `TokensUsedThisMonth` was reset only by the user's next AI call, and `GET /api/auth/me` read it without the month rule, so from the first of a month until that call it reported the previous month's usage. The same lazy reset raced the atomic increment at the boundary (ADR-37).
+**Fix**: Removed the counter and `LastTokenResetDate`; monthly usage is now the sum of the month's `AiUsageLogs` rows, and the month starts at Riyadh midnight (ADR-39, ADR-40).
+**Why**: A stored aggregate with an expiry is a cache, and every reader must know when it expires. When the history it summarizes is already stored and indexed, compute from the history instead of keeping a second copy that can drift.
+
 ---
 
 ## B. Configuration & Wiring
@@ -308,6 +318,11 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: `docker compose down -v` first, then `migrations remove` once per migration, then confirmed `Migrations/` was completely empty before `migrations add InitialCreate`. Read the generated file and counted the `CreateTable` calls, with zero `AlterColumn`, before applying anything. Done twice — once for the schema fixes, once after the A15 restructure.
 **Why**: EF diffs against the snapshot, not against the database. Deleting migration files without deleting the snapshot changes what is recorded, not what EF believes already exists.
 
+### E6. A generated migration was scaffolded with an empty `Up` (M8.1)
+**Problem**: `dotnet ef migrations add RemoveTokenCounterFromUsers` wrote its three files and updated the snapshot, but the `Up` body was empty — no `DropColumn` for `TokensUsedThisMonth` or `LastTokenResetDate`, although both properties had already been removed from `User`. Applying it as generated would have recorded the migration as done while changing nothing, leaving the database two columns ahead of the model.
+**Fix**: The project owner wrote the two `DropColumn` calls by hand, applied the migration, and confirmed in `psql` that neither column remains on `Users` and that `__EFMigrationsHistory` lists it.
+**Why**: EF scaffolds operations by diffing `StudyHubDbContextModelSnapshot.cs` against the current model — never the database against the model (E5). When the snapshot is already level with the model, that diff is empty and so is the migration, while the command still succeeds and still writes a plausible-looking file. A migration must be read before it is applied; an exit code says a file was written, not that the file does anything.
+
 ---
 
 ## F. Runtime & Environment
@@ -344,6 +359,7 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: The first `dotnet build` of M7 failed with `MSB3021: Unable to copy file ... StudyHub.Infrastructure.dll ... being used by another process`, while `dotnet test` in the same run passed with 105 tests. The process holding the file was a `StudyHub.API` started the day before and never stopped; it also held port 5158.
 **Fix**: Found the owner with `Get-NetTCPConnection -LocalPort 5158` and `Get-Process`, stopped it, rebuilt clean. The M7 manual run then started its own instance and stopped it afterwards.
 **Why**: On Windows a running process locks its own DLLs, so only the project whose output it runs fails to build; the test projects build into other folders and stay green. A green `dotnet test` next to a red build is therefore a sign of a locked file, not of broken code. A server started for a manual check belongs to that check and should be stopped when it ends.
+**Repeat (M8.1)**: The same lock, a day later: a `StudyHub.API` started on 18 September (the owner's first real Gemini call) still held port 5158, so the M8.1 baseline build failed with `MSB3027`/`MSB3021` while all 185 tests passed. Identified with `Get-NetTCPConnection -LocalPort 5158` and `Win32_Process` (its creation date and its path under `StudyHub.API/bin`), stopped, rebuilt clean. Checking the port before the first build is now Step 0 of every plan for this reason.
 
 ---
 

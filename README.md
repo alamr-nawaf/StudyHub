@@ -109,6 +109,7 @@ Everything else is non-secret and lives in `appsettings.json`:
 | `Ai:ThinkingLevel` | Optional. The provider's own name for how hard to think, passed straight through. Empty sends nothing |
 | `Ai:FakeFailure` | `true` makes the fake provider fail every call, so the 502 path is testable |
 | `UserQuota:DefaultMonthlyTokens` | The monthly token quota a new account starts with |
+| `BusinessTime:TimeZoneId` | The one time zone business periods are computed in, `Asia/Riyadh`. Storage and the API stay UTC; only "which month" — and, from M9, "which day" — is asked in this zone (ADR-40) |
 
 A missing or non-positive value in that section stops startup with a message naming the key. `Ai:ThinkingBudget` and `Ai:ThinkingLevel` are the two exceptions: both are optional, and `0` is a meaningful budget rather than a missing one.
 
@@ -211,6 +212,7 @@ Dependencies point inward only: `API → Infrastructure → Application → Doma
 | `ValidationException ... Password` at startup | `AdminSeed:Password` fails the registration password policy (step 3b) |
 | `Ai:ApiKey is set, so Ai:Model must name the model to call` at startup | A provider key was stored without a model name (step 3c) |
 | `Ai:CharsPerToken must be configured with a positive number` at startup | A value under `Ai:` or `UserQuota:` is missing or not positive — check `appsettings.json` |
+| `BusinessTime:TimeZoneId` names a time zone this machine does not know at startup | The id is misspelt, or the machine has no time-zone database. Use the IANA id `Asia/Riyadh` |
 | 502 from an AI endpoint while no key is configured | `Ai:FakeFailure` is `true`; set it back to `false` |
 | MediatR license warning at startup | Expected and harmless — the project is inside the free tier |
 
@@ -239,9 +241,11 @@ M1–M6 complete: architecture, domain, schema, error handling, the content tree
 
 M6 delivered login with JWT access tokens and hashed refresh tokens; refresh rotation with an `xmin` concurrency token and reuse detection (replaying a rotated token revokes every session the user has); logout; endpoints protected by default; permission policies driven by the Domain's role map; the first administrator endpoint; and seeding the first administrator from configuration. The `X-User-Id` bypass is gone.
 
-M7 (in progress, awaiting review) adds DTOs, read queries for courses, items, trees and the current user, update endpoints for courses, items and tasks, and pagination.
+M7 complete: it adds DTOs, read queries for courses, items, trees and the current user, update endpoints for courses, items and tasks, and pagination.
 
-M8 (in progress) adds the two AI endpoints behind one `IAiService`, with a fake provider chosen at startup when no key is configured, the pre-call quota estimate, the atomic usage record, and the default quota moved to configuration. It is marked done once the owner has made one real provider call.
+M8 complete: the two AI endpoints behind one `IAiService`, with a fake provider chosen at startup when no key is configured, the pre-call quota estimate, the usage record, and the default quota moved to configuration. One real provider call has been made.
+
+M8.1 (in progress, awaiting review) removes the stored token counter: a user's monthly AI usage is the sum of that month's `AiUsageLogs` rows, recording is one insert, and a month begins at midnight in the configured business time zone rather than at UTC midnight.
 
 **Next: M9** — the dashboard aggregation.
 

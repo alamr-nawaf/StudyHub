@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using StudyHub.Application.Common.Interfaces;
 using StudyHub.Application.Common.Settings;
+using StudyHub.Application.Common.Time;
 using StudyHub.Infrastructure.Ai;
 using StudyHub.Infrastructure.Authentication;
 using StudyHub.Infrastructure.Data;
@@ -48,6 +49,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
         services.AddSingleton(ReadUserQuotaSettings(configuration));
+        services.AddSingleton(new BusinessCalendar(ReadBusinessTimeZone(configuration)));
         services.AddAiProvider(configuration);
 
         return services;
@@ -61,7 +63,7 @@ public static class ServiceCollectionExtensions
     {
         var settings = ReadAiSettings(configuration);
         services.AddSingleton(settings);
-        services.AddScoped<IAiUsageRecorder, AiUsageRecorder>();
+        services.AddScoped<IAiUsageLedger, AiUsageLedger>();
 
         var apiKey = configuration[$"{AiSettings.SectionName}:ApiKey"];
 
@@ -95,6 +97,29 @@ public static class ServiceCollectionExtensions
         var defaultMonthlyTokens = Positive(section, "DefaultMonthlyTokens");
 
         return new UserQuotaSettings(defaultMonthlyTokens);
+    }
+
+    // Read once at startup like every other setting: an unknown zone found on the first
+    // AI call would be a 500 far from the configuration that caused it (ADR-40). The id is
+    // resolved by the operating system, and .NET accepts IANA ids such as Asia/Riyadh on
+    // Windows as well as on Linux.
+    private static TimeZoneInfo ReadBusinessTimeZone(IConfiguration configuration)
+    {
+        const string key = "BusinessTime:TimeZoneId";
+        var timeZoneId = configuration[key];
+
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+            throw new InvalidOperationException($"{key} is not configured.");
+
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId.Trim());
+        }
+        catch (Exception exception) when (exception is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            throw new InvalidOperationException(
+                $"{key} names a time zone this machine does not know: '{timeZoneId}'.", exception);
+        }
     }
 
     private static AiSettings ReadAiSettings(IConfiguration configuration)
