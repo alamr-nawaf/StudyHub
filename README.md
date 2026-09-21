@@ -192,6 +192,7 @@ Dependencies point inward only: `API → Infrastructure → Application → Doma
 | DELETE | `/api/items/{id}` | user | 204 — soft-deletes the item and its whole subtree; not reversible through the API |
 | POST | `/api/notes/{id}/summarize` | user | 200 + `{ summary, tokensUsed }` — empty body; the summary is returned, never stored |
 | POST | `/api/notes/{id}/extract-tasks` | user | 200 + `{ suggestions, tokensUsed }` — empty body; nothing is created until the user approves a suggestion with `POST /api/tasks` |
+| GET | `/api/dashboard` | user | 200 + counts, at most 10 urgent tasks and at most 5 recent courses; 404 if the account row is gone |
 | PATCH | `/api/admin/users/{id}/deactivate` | administrator | 204 — the account can no longer log in or refresh |
 
 "user" means any valid access token (`Authorization: Bearer ...`); without one the response is 401. Another user's course or item returns 403, for reads and writes alike. Lists take `page` (from 1) and `pageSize` (20 by default, at most 100); a value out of range is 400. A null `description`, `content` or `dueDate` in an update body clears the value.
@@ -247,7 +248,9 @@ M8 complete: the two AI endpoints behind one `IAiService`, with a fake provider 
 
 M8.1 (in progress, awaiting review) removes the stored token counter: a user's monthly AI usage is the sum of that month's `AiUsageLogs` rows, recording is one insert, and a month begins at midnight in the configured business time zone rather than at UTC midnight.
 
-**Next: M9** — the dashboard aggregation.
+M9 (in progress, awaiting review) adds `GET /api/dashboard`: counts, the ten most urgent tasks and the five most recently used courses, in exactly three SQL statements whatever the amount of data. "Urgent" is counted in Riyadh calendar days, and "recent" means the newest change anywhere inside the course.
+
+**Next: M10** — integration tests, rate limiting, refresh-token cleanup and API containerization.
 
 Full roadmap: [`docs/Requirements.md`](docs/Requirements.md) §11.
 

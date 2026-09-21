@@ -386,6 +386,8 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: Gave session C its own account, `rotate@test.com`, and left the damaged one damaged. The revert steps stay in the session B script but are no longer load-bearing.
 **Why**: A proof that mutates shared state is a test without teardown. Reverting one of two mutations is the common case, not forgetting both: the first revert makes the cleanup feel finished. Two cheaper habits: one throwaway account per proof session, and reading the *first* red result rather than the noisiest one — the chained-request errors here were consequences, and chasing them would have cost an hour on a file that was correct.
 
+**Repeat (M9)**: `ADM3` deactivated the shared `other@test.com`, which `A5`, `M7-18`, `M8-8` and `M8-9` log in as, so one run of the admin section broke all four. The admin requests now consume their own account, `adm-target@test.com`, and `other@test.com` was checked in `psql` and found still active, so no reactivation was needed.
+
 ---
 
 ## H. Leftover Scaffolding

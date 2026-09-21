@@ -35,6 +35,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICourseQueries, CourseQueries>();
         services.AddScoped<IItemQueries, ItemQueries>();
         services.AddScoped<IUserQueries, UserQueries>();
+        services.AddScoped<IDashboardQueries, DashboardQueries>();
         // تسجيل الـ DbContext مع محرك PostgreSQL
         services.AddDbContext<StudyHubDbContext>(options =>
             options.UseNpgsql(connectionString));

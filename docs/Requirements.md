@@ -197,6 +197,9 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Applic
 | **38** | **Summarizing and extracting tasks are two endpoints, not one call returning both** | The user picks one of them for a reason: a summary is text to read, a task is a checkbox to tick, and they appear in different places in any client. Charging for both when the user asked for one is waste, and a response with a filled half and an empty half is a shape no client wants | Two prompts, two result types and two handlers that repeat the same §15 order. `AiUsageLog.OperationType` is what tells the two apart in the record |
 | **39** | **Monthly AI usage is the sum of the month's `AiUsageLogs` rows; `Users` stores no counter** (supersedes ADR-16 and ADR-37) | The counter was a cached copy of the log with an expiry, reset lazily by the user's next AI call. Every reader had to know when it expired, and `GET /api/auth/me` did not, so it showed last month's usage until the first call of a new month; the lazy reset also raced the atomic increment at the month boundary. Summing the log removes the copy: nothing to reset, nothing to go stale, and recording becomes one insert, which parallel operations can neither lose nor collide on. The `(UserId, CreatedAt)` index serves the sum | Every quota check and every `GET /api/auth/me` sums the month's rows instead of reading one column — an index range scan, negligible at per-user scale. A migration drops `TokensUsedThisMonth` and `LastTokenResetDate`, and rolling it back cannot restore their values. The pre-call overshoot of ADR-24 is unchanged |
 | **40** | **Timestamps are stored and exchanged in UTC; business periods are computed in one configured time zone, Asia/Riyadh** | The users are in Riyadh, so "this month" — and, from M9, "today" — must begin at Riyadh midnight, not at UTC midnight three hours later; otherwise the first three hours of a month count toward the previous one. Storage stays UTC because Npgsql writes only UTC to `timestamptz` (ADR-18) and an instant has no time zone — only the question "which month, which day" does. One zone in configuration (`BusinessTime:TimeZoneId`), validated at startup, and one class, `BusinessCalendar`, that answers the question | One zone for every user: a user elsewhere gets Riyadh's months and days. A per-user zone would need a column and a profile field. Clients still send and receive `Z` values, and showing Riyadh time is the client's job |
+| **41** | **"Recent courses" on the dashboard means latest activity: the later of the course's own last change and the newest change among its non-deleted items, at any depth** | A course is used by working inside it — adding a note, ticking a task — and almost never by renaming it, so ordering by the course's own timestamps would leave the course a user just worked in off the list. Every item carries its root's `CourseId` (ADR-09), so "every item of the course, at any depth" is one flat condition, and the newest change is one correlated aggregate inside the same statement: no extra round trip and no migration | A more complex statement, whose order PostgreSQL computes instead of reading it from an index — negligible at per-user scale. Deleting an item is not activity: deleted rows are filtered out, so a delete can move a course down the list. A stored `LastActivityAt` column was rejected: a migration, and every item command would have to remember to touch its course — the drift ADR-16 warns about |
+| **42** | **The dashboard has its own read-side interface, `IDashboardQueries`, with one method; the handler owns the numbers of §15.4 and passes them in; the database is asked exactly three statements** | UC-08 is one use case with one definition, so its read model lives in one place (§6), and its counts span two tables, so no per-area interface is their natural home. The handler reads the clock once and passes the window and the limits, so every rule of §15.4 is visible — and tested — in Application while Infrastructure only translates it. Three fixed statements — every count in one row, the urgent tasks, the recent courses — make the statement count independent of the data, and one statement for every count is one snapshot, so the task statuses always add up to the task total | One more interface and implementation, the cost ADR-32 already accepts. Its SQL is not unit-tested, because the handler test mocks the interface: until M10 the proof is the logged statements and a `psql` comparison. The counts statement is anchored on the user's own row, a less obvious shape than one `Count` per number |
+| **43** | **The dashboard's lists use their own small DTOs, `UrgentTaskDto` and `RecentCourseDto`, not `ItemDto` and `CourseDto`** | A dashboard shows a title and a date. `ItemDto` carries `Content`, which is deliberately unbounded (§7), so ten urgent tasks could carry ten bodies no dashboard displays. The lists also need fields the shared DTOs lack — `isOverdue` and `lastActivityAt` — and adding them there would change every endpoint that returns those DTOs | Two more records and two more projections. A client that wants a task's body calls `GET /api/items/{id}` |
 
 ---
 
@@ -212,8 +215,9 @@ StudyHub.Application/
 │   │                   IRefreshTokenRepository, ITokenService
 │   │                   AccessToken, RefreshTokenResult — the records
 │   │                   ITokenService returns
-│   │                   ICourseQueries, IItemQueries, IUserQueries —
-│   │                   the read side, returning DTOs (ADR-32)
+│   │                   ICourseQueries, IItemQueries, IUserQueries,
+│   │                   IDashboardQueries — the read side, returning
+│   │                   DTOs (ADR-32, ADR-42)
 │   │                   IAiService, IAiUsageLedger
 │   ├── Behaviors/    → ValidationBehavior.cs
 │   ├── Settings/     → AiSettings.cs, UserQuotaSettings.cs — plain records
@@ -241,7 +245,10 @@ StudyHub.Application/
 ├── Items/                  → ItemDto.cs, ItemMappings.cs
 ├── Items/Commands/{DeleteItem, UpdateItemContent}/
 ├── Items/Queries/{GetItem, GetItemTree, GetRootItems}/
-├── Dashboard/Queries/GetDashboard/                                     (M9)
+├── Dashboard/               → DashboardDto.cs, DashboardCountsDto.cs,
+│                              UrgentTaskDto.cs, RecentCourseDto.cs,
+│                              DashboardCriteria.cs
+├── Dashboard/Queries/GetDashboard/
 └── Users/Commands/{RegisterUser, DeactivateUser, SeedAdministrator}/
 ```
 
@@ -382,6 +389,7 @@ This table is the only record of AI usage. A user's monthly usage is the sum of 
 | DELETE | `/api/items/{id}` | user | 204 |
 | POST | `/api/notes/{id}/summarize` | user | 200 + `{ summary, tokensUsed }`; 403, 404, 429, 502. Empty body; nothing is stored (§15) |
 | POST | `/api/notes/{id}/extract-tasks` | user | 200 + `{ suggestions, tokensUsed }`; 403, 404, **409**, 429, 502. Empty body; nothing is created (ADR-28) |
+| GET | `/api/dashboard` | user | 200 + `DashboardDto` (§15.4); 404 if the account row is gone |
 | PATCH | `/api/admin/users/{id}/deactivate` | `users:deactivate` permission² | 204 |
 
 Deletion, reading and content edits have one route for both notes and tasks, because those operations do not distinguish them. Status and schedule live under `/api/tasks`, because only a task has them.
@@ -410,9 +418,6 @@ Deletion, reading and content edits have one route for both notes and tasks, bec
 `expiresIn` is the access token's remaining lifetime in **seconds**, so the client never has to parse the JWT to schedule a refresh. No user profile fields are included (ADR-21); a client needing them calls `GET /api/auth/me`.
 
 **The two AI endpoints take an empty body**: the note is named by the route and its text is already stored. They are separate calls and separate charges, and a request never does both (ADR-38). 409 belongs to extraction alone — a summary creates nothing, so the depth guard does not apply to it (ADR-26). Approval of a suggestion uses the existing `POST /api/tasks`, with `parentItemId` set to the note.
-
-### Planned — M9
-`GET /api/dashboard` — contents defined in §15.4.
 
 ### Error contract
 All errors return RFC 9457 `ProblemDetails`:
@@ -562,7 +567,7 @@ The path of an authorized request: login issues the `role` claim → `[Authorize
 | M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | ✅ |
 | M8 | AI integration & quota enforcement (UC-06, UC-07): the summarize and extract-tasks endpoints behind one `IAiService` with a fake provider (ADR-35, ADR-38), user approval (ADR-28), the `ConsumeTokens` split into `HasQuotaFor` plus the atomic record (ADR-36, ADR-37 — the record was replaced in M8.1, ADR-39), failure model, extraction depth guard, quota to configuration | ✅ |
 | M8.1 | **Quota from the log**: monthly usage summed from AiUsageLogs instead of a stored counter (ADR-39), business periods in Asia/Riyadh (ADR-40) | In progress |
-| M9 | Dashboard aggregation (UC-08) as defined in §15.4 | Pending |
+| M9 | Dashboard aggregation (UC-08) as defined in §15.4 | In progress |
 | M10 | Integration tests, rate limiting, refresh-token cleanup, API containerization | Pending |
 
 > **Renumbering note.** v1.1 listed M5 as authentication and M6 as content management. What was actually built in that slot was hardening plus the content tree. The roadmap has been rewritten to match what happened rather than what was planned — which also keeps every `(M5)` tag in the troubleshooting log accurate. M5.1 is numbered as a point release for the same reason: it is cleanup of M5's output, not a milestone of its own, and giving it a whole number would shift every tag after it. **M5.2 is a decimal for the same reason and one more**: it is a schema and domain change only, kept out of M6 so that a migration is not mixed into the heaviest security milestone. A migration is easier to read, and easier to roll back, on its own.
@@ -602,11 +607,9 @@ Each of these is a decision, not an oversight.
 
 ## 13. Open Questions
 
-Closed since v2.0: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate**. The authentication questions are answered in §9.1; the registration message is an accepted risk (§9.4); `DeletedAt` is deferred (ADR-25); pagination, tree shape, and concurrency are settled in §14; the approval flow and quota ordering in §15. Three M7 questions are closed as well: item counts on `GET /api/courses` (question 3, ADR-34), where a read query projects (question 4, ADR-32), and reading another user's resource (question 7, ADR-33). Three M8 questions are closed too: the provider and its abstraction (question 1, ADR-35), the estimated cost per operation (question 2, ADR-36), and how the token counter survives concurrent operations (question 5, ADR-37).
+Closed since v2.0: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate**. The authentication questions are answered in §9.1; the registration message is an accepted risk (§9.4); `DeletedAt` is deferred (ADR-25); pagination, tree shape, and concurrency are settled in §14; the approval flow and quota ordering in §15. Three M7 questions are closed as well: item counts on `GET /api/courses` (question 3, ADR-34), where a read query projects (question 4, ADR-32), and reading another user's resource (question 7, ADR-33). Three M8 questions are closed too: the provider and its abstraction (question 1, ADR-35), the estimated cost per operation (question 2, ADR-36), and how the token counter survives concurrent operations (question 5, ADR-37). The M9 question is closed too: what "recent courses" means (question 6, ADR-41).
 
-Still open. None blocks M8; each names the milestone that needs the answer. The remaining questions keep their original numbers, because other text refers to them by number:
-
-**6.** **What does "recent courses" mean?** (M9, §15.4) As defined, the most recently created or edited. Ordering by the latest item activity is truer to the word, at the cost of one aggregate per course.
+No question is open. A new question takes the next unused number, 8: numbers are never reused, because other text refers to them by number.
 
 ---
 
@@ -767,26 +770,56 @@ Nothing originating outside the process reaches the client as a 500.
 
 ### 15.4 Dashboard definition (UC-08)
 
-"Statistics, active courses, urgent tasks" cannot be finished, only extended. This is what the endpoint returns:
+"Statistics, active courses, urgent tasks" cannot be finished, only extended. This is what `GET /api/dashboard` returns, for the caller only:
 
 **Counts**
 - Courses not deleted
 - Items by kind (notes, tasks)
-- Tasks by status (Pending, InProgress, Completed)
+- Tasks by status (Pending, InProgress, Completed). Every task has exactly one of the three, so they add up to the task total
 - Tasks overdue: `Status != Completed AND DueDate < utcNow`
 
-**Urgent tasks** — at most **10**, ordered by `DueDate` ascending:
+**Urgent tasks** — at most **10**, ordered by `DueDate` ascending, then by id:
 
 ```
 Status != Completed
 AND DueDate IS NOT NULL
-AND DueDate <= utcNow + 3 days
+AND DueDate < start of today in Riyadh + 4 days
 ```
 
-Overdue tasks are included, because a task that is already late is more urgent than one due tomorrow, not less.
+Overdue tasks are included, because a task that is already late is more urgent than one due tomorrow, not less. Each entry says whether it is overdue.
 
-**Recent courses** — at most 5, ordered by `UpdatedAt` descending, falling back to `CreatedAt`. Note what this measures: a course's `UpdatedAt` changes only when its own title or description does — adding an item under it touches nothing on the course. The list therefore means "recently created or edited", not "recently used" (§13).
+**"Within 3 days" counts Riyadh calendar days** (ADR-40): today and the three days after it, up to midnight in Riyadh. On the 18th, a task due at 23:30 on the 21st is urgent, exactly like one due at 08:00 on the 21st. Overdue is an instant, not a day: `DueDate < utcNow`.
 
-**The N+1 requirement is verified, not asserted.** Enable EF Core SQL logging, call the endpoint against a user with many courses and items, and count the statements. The count must be a small fixed number and must not grow with the data. "It looked fast" is not the proof.
+**Recent courses** — at most **5**, ordered by latest activity descending, then by id (ADR-41). A course's latest activity is the later of its own last change — `UpdatedAt`, or `CreatedAt` if it was never edited — and the newest `UpdatedAt ?? CreatedAt` among its non-deleted items, at any depth. Adding, editing or ticking anything under a course moves it up; deleting an item is not activity.
+
+**Never order by a nullable timestamp directly.** PostgreSQL puts `NULL` first in a descending order, so a course that was never edited would jump to the top. Every ordering above is on a value that cannot be null.
+
+**One instant per response.** The handler reads the clock once. The overdue count, each `isOverdue` flag and the urgent window all come from that instant, which the response returns as `generatedAt`.
+
+**The two lists are capped previews, not collections.** §14.2 paginates collections a client pages through; these lists are fixed-size summaries and are never paginated.
+
+**The response** (ADR-43):
+
+```json
+{
+  "generatedAt": "2026-09-25T09:00:00Z",
+  "counts": {
+    "courses": 3, "notes": 12, "tasks": 9,
+    "pendingTasks": 4, "inProgressTasks": 2, "completedTasks": 3,
+    "overdueTasks": 1
+  },
+  "urgentTasks": [
+    { "id": "…", "title": "Finish lab 3", "courseId": "…", "status": 0,
+      "priority": 2, "dueDate": "2026-09-24T18:00:00Z", "isOverdue": true }
+  ],
+  "recentCourses": [
+    { "id": "…", "title": "Databases", "lastActivityAt": "2026-09-25T08:40:00Z" }
+  ]
+}
+```
+
+**404** when no account row exists for the token's user, the same as `GET /api/auth/me`: a dashboard of zeros for an account that does not exist would be a false answer.
+
+**The N+1 requirement is verified, not asserted.** The endpoint issues exactly three SQL statements — every count in one row, the urgent tasks, the recent courses (ADR-42) — whatever the amount of data. The proof is counting them in the EF Core SQL log for one request with a few items and again with hundreds: the two numbers must be equal. "It looked fast" is not the proof.
 
 

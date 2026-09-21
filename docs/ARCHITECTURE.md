@@ -384,6 +384,29 @@ graph LR
 
 **The log is the only record of usage** (ADR-39). Until M8.1 a counter on `Users` was incremented in the same transaction as the `AiUsageLog` row, and it was reset lazily by the user's next AI call — so `GET /api/auth/me` reported last month's figure until that call, and the lazy reset raced the increment at the month boundary. The counter was a cached copy of a table that was already stored and indexed, so it was removed: a user's monthly usage is now the sum of their `AiUsageLogs` rows since the start of the month, recording is one insert that parallel operations can neither lose nor collide on, and there is nothing to reset. The month itself starts at midnight in Riyadh, not at UTC midnight three hours later (ADR-40). The rule and the record stay separate: `User.HasQuotaFor(used, estimate)` in Domain answers the question, and the inserted row is the record (ADR-24, Requirements §15.1).
 
+### 4.7 The dashboard (UC-08)
+
+```
+GET /api/dashboard
+  → DashboardController: send GetDashboardQuery, return Ok
+  → GetDashboardQueryHandler: read the clock once, work out the window and the caps
+  → IDashboardQueries.GetAsync(userId, criteria)
+  → DashboardQueries: three statements — the counts, the urgent tasks, the recent courses
+  → DashboardDto, or null → NotFoundException → 404
+```
+
+**The rules live in Application, the SQL in Infrastructure.** The handler owns every number of §15.4 — the three-day window, the cap of 10 urgent tasks, the cap of 5 recent courses — and hands them down as a `DashboardCriteria` record. Infrastructure decides nothing; it translates. That is what makes the rules testable without a database: the handler test asserts the literal window and the literal caps against a mocked interface, and it was watched failing before it was trusted (ADR-42).
+
+**One instant per response.** The handler reads `DateTime.UtcNow` once. The overdue count, every `isOverdue` flag and the urgent window all come from that instant, and the response returns it as `generatedAt`. Two clock reads in one response could disagree with each other, and a dashboard that contradicts itself is worse than one that is a second old.
+
+**The statement count is fixed, and that was proven, not asserted.** Every count is one statement anchored on the user's own row, with each number a correlated sub-count; the two lists are one statement each, sorted and limited in SQL. Three statements for a user with 11 items, three for the same user with 528 — counted in the EF Core SQL log on both sides, which is the only proof that means anything (§15.4). One statement for all the counts is also one snapshot, so the three task statuses always add up to the task total.
+
+**A course's "latest activity" is the newest thing under it** (ADR-41), not the last time its own title changed: the later of `UpdatedAt ?? CreatedAt` on the course and the newest `UpdatedAt ?? CreatedAt` among its non-deleted items, at any depth. Because every item carries its root's `CourseId` (ADR-09), "at any depth" is one flat condition and the aggregate stays inside the same statement. Ticking a task therefore moves its course up the list, which is what a user means by "recent"; deleting an item is not activity, so a delete can move a course down.
+
+**Never order by a nullable timestamp.** PostgreSQL sorts `NULL` first in a descending order, so ordering courses by `UpdatedAt DESC` would put every course that was never edited at the top — the newest-looking list being exactly the untouched ones. Both orderings here are on a coalesced value that cannot be null, and the `COALESCE` is visible in the logged SQL.
+
+**404, not a dashboard of zeros**, when the token is valid but the account row is gone. Zeros are an answer; for an account that does not exist they would be a false one, and `GET /api/auth/me` already answers the same way.
+
 ---
 
 ## 5. The `Items` Table and TPH

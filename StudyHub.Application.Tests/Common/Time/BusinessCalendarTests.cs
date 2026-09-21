@@ -56,6 +56,28 @@ public class BusinessCalendarTests
     }
 
     [Fact]
+    public void DayStartUtc_EveningInRiyadh_ShouldReturnThatDaysMidnight()
+    {
+        var now = Utc(2026, 9, 19, 17);
+
+        var dayStart = Calendar.DayStartUtc(now);
+
+        dayStart.Should().Be(Utc(2026, 9, 18, 21));
+        dayStart.Kind.Should().Be(DateTimeKind.Utc);
+    }
+
+    [Fact]
+    public void DayStartUtc_AfterRiyadhMidnight_ShouldAlreadyBeTheNextDay()
+    {
+        // 22:30Z on 19 September is already 20 September in Riyadh
+        var now = Utc(2026, 9, 19, 22, 30);
+
+        var dayStart = Calendar.DayStartUtc(now);
+
+        dayStart.Should().Be(Utc(2026, 9, 19, 21));
+    }
+
+    [Fact]
     public void MonthStartUtc_NonUtcInput_ShouldThrow()
     {
         var now = new DateTime(2026, 9, 19, 12, 0, 0, DateTimeKind.Unspecified);

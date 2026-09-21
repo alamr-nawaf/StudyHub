@@ -1,4 +1,4 @@
-@baseUrl = http://localhost:5158
+﻿@baseUrl = http://localhost:5158
 
 ### S0. مستخدم الجلسة — مرة واحدة فقط. المتوقع: 201
 POST {{baseUrl}}/api/auth/register
@@ -359,6 +359,18 @@ Content-Type: application/json
 @adminEmail = admin@example.com
 @adminPassword = CHANGE-ME
 
+### ADM-S. The account this section consumes — expected: 201 the first time, 409 afterwards.
+### Both are fine: it only has to exist before ADM1.
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Admin Target",
+  "email": "adm-target@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
 ### ADM0. دخول المسؤول — المتوقع: 200
 # @name admin
 POST {{baseUrl}}/api/auth/login
@@ -366,23 +378,23 @@ Content-Type: application/json
 
 { "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
 
-### ADM0b. معرّف المستخدم الثاني — من psql:
-###   SELECT "Id" FROM "Users" WHERE "Email" = 'other@test.com';
-@otherUserId = 00000000-0000-0000-0000-000000000000
+### ADM0b. The id of the account this section deactivates — from psql:
+###   SELECT "Id" FROM "Users" WHERE "Email" = 'adm-target@test.com';
+@admTargetId = 00000000-0000-0000-0000-000000000000
 
 ### ADM1. بلا توكن — المتوقع: 401
-PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
 
 ### ADM2. مستخدم عادي — المتوقع: 403
-PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
 Authorization: Bearer {{s.response.body.$.accessToken}}
 
 ### ADM3. مسؤول — المتوقع: 204، وpsql يُظهر IsActive = false
-PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
 Authorization: Bearer {{admin.response.body.$.accessToken}}
 
 ### ADM4. تكرار — المتوقع: 204 (Deactivate متسامحة)
-PATCH {{baseUrl}}/api/admin/users/{{otherUserId}}/deactivate
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
 Authorization: Bearer {{admin.response.body.$.accessToken}}
 
 ### ADM5. معرّف غير موجود — المتوقع: 404
@@ -390,12 +402,14 @@ PATCH {{baseUrl}}/api/admin/users/3f2b8c1e-9a4d-4e6b-8c7a-1d2e3f4a5b6c/deactivat
 Authorization: Bearer {{admin.response.body.$.accessToken}}
 
 ### ADM6. المعطَّل يحاول الدخول — المتوقع: 401
-###       تحذير: هذا يعطّل other@test.com نهائيًا، وA5 يعتمد عليه (G5). للإعادة من psql:
-###       UPDATE "Users" SET "IsActive" = true WHERE "Email" = 'other@test.com';
+###       Warning: this consumes adm-target@test.com for good — there is no reactivation
+###       endpoint. It no longer touches the shared other@test.com, which A5, M7-18, M8-8
+###       and M8-9 log in as (G5). To run this section again, reactivate it from psql:
+###       UPDATE "Users" SET "IsActive" = true WHERE "Email" = 'adm-target@test.com';
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
-{ "email": "other@test.com", "password": "Password123" }
+{ "email": "adm-target@test.com", "password": "Password123" }
 
 ### ───────── M7: القراءة والتعديل ─────────
 ###  كلها بتوكن S1. السلسلة: كورس ← ملاحظة تحته ← مهمة تحت الملاحظة، ثم قراءة وتعديل
@@ -590,3 +604,18 @@ Authorization: Bearer {{s.response.body.$.accessToken}}
 
 ### M8-14. Without a token — expected: 401
 POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+
+### ───────── M9: the dashboard (UC-08) ─────────
+###  All with the S1 token unless stated. The numbers depend on what this file has already
+###  created, so read the response against §15.4 rather than against a fixed table.
+
+### M9-1. The caller's dashboard — expected: 200 with counts, urgentTasks and recentCourses
+GET {{baseUrl}}/api/dashboard
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M9-2. Without a token — expected: 401
+GET {{baseUrl}}/api/dashboard
+
+### M9-3. The second user's dashboard — expected: 200 with their own numbers only (ADR-33)
+GET {{baseUrl}}/api/dashboard
+Authorization: Bearer {{other.response.body.$.accessToken}}

@@ -29,4 +29,20 @@ public sealed class BusinessCalendar
         // parameter (ADR-18)
         return TimeZoneInfo.ConvertTimeToUtc(monthStartLocal, _zone);
     }
+
+    // The UTC instant at which the business day containing utcNow began,
+    // e.g. 19 September 00:00 in Riyadh = 18 September 21:00Z
+    public DateTime DayStartUtc(DateTime utcNow)
+    {
+        if (utcNow.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("The current instant must be a UTC DateTime.", nameof(utcNow));
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow, _zone);
+
+        // Built as Unspecified on purpose: ConvertTimeToUtc refuses a Local instant for a
+        // zone that is not the machine's, and midnight in the zone is neither UTC nor local
+        var dayStartLocal = new DateTime(local.Year, local.Month, local.Day, 0, 0, 0, DateTimeKind.Unspecified);
+
+        return TimeZoneInfo.ConvertTimeToUtc(dayStartLocal, _zone);
+    }
 }
