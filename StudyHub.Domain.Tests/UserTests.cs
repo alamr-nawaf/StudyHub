@@ -1,6 +1,7 @@
 ﻿using FluentAssertions;
+using StudyHub.Domain.Authorization;
 using StudyHub.Domain.Entities;
-
+using StudyHub.Domain.Enums;
 namespace StudyHub.Domain.Tests;
 
 public class UserTests
@@ -25,44 +26,57 @@ public class UserTests
     }
 
     [Fact]
-    public void ConsumeTokens_WithinQuota_ShouldIncreaseCounter()
+    public void HasQuotaFor_EstimateReachingExactlyTheQuota_ShouldReturnTrue()
     {
         var user = CreateSut(quota: 100);
 
-        user.ConsumeTokens(30);
+        var hasQuota = user.HasQuotaFor(tokensUsedThisMonth: 30, estimatedTokens: 70);
 
-        user.TokensUsedThisMonth.Should().Be(30);
+        hasQuota.Should().BeTrue();
     }
 
     [Fact]
-    public void ConsumeTokens_ExceedingQuota_ShouldThrowInvalidOperationException()
+    public void HasQuotaFor_EstimateOneTokenOverTheQuota_ShouldReturnFalse()
     {
         var user = CreateSut(quota: 100);
 
-        var act = () => user.ConsumeTokens(101);
+        var hasQuota = user.HasQuotaFor(tokensUsedThisMonth: 30, estimatedTokens: 71);
 
-        act.Should().Throw<InvalidOperationException>();
+        hasQuota.Should().BeFalse();
     }
 
     [Fact]
-    public void ResetQuotaIfNeeded_InSameMonth_ShouldKeepCounter()
+    public void Create_ShouldDefaultToUserRole()
     {
         var user = CreateSut();
-        user.ConsumeTokens(50);
 
-        user.ResetQuotaIfNeeded(DateTime.UtcNow);
-
-        user.TokensUsedThisMonth.Should().Be(50);
+        user.Role.Should().Be(UserRole.User);
     }
 
     [Fact]
-    public void ResetQuotaIfNeeded_InNewMonth_ShouldResetCounter()
+    public void PromoteToAdmin_ShouldChangeRole()
     {
         var user = CreateSut();
-        user.ConsumeTokens(50);
 
-        user.ResetQuotaIfNeeded(DateTime.UtcNow.AddMonths(1));
+        user.PromoteToAdmin();
 
-        user.TokensUsedThisMonth.Should().Be(0);
+        user.Role.Should().Be(UserRole.Admin);
+    }
+
+    [Fact]
+    public void Can_RegularUser_ShouldNotHaveAdminPermission()
+    {
+        var user = CreateSut();
+
+        user.Can(Permissions.UsersDeactivate).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Can_Admin_ShouldHaveAdminPermission()
+    {
+        var user = CreateSut();
+        user.PromoteToAdmin();
+
+        user.Can(Permissions.UsersDeactivate).Should().BeTrue();
     }
 }

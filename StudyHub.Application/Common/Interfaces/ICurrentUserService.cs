@@ -1,6 +1,9 @@
 ﻿namespace StudyHub.Application.Common.Interfaces;
 
-// من هو المستخدم الحالي؟ التطبيق يسأل، والـ API يجيب.
+/// <summary>
+/// Who the caller is. Application asks; the API answers, from the validated token — which is
+/// how Application stays free of any knowledge of HTTP.
+/// </summary>
 public interface ICurrentUserService
 {
     Guid UserId { get; }

@@ -1,5 +1,40 @@
-@baseUrl = http://localhost:5158
-@userId = a72789ff-f9a4-4506-baab-f55ae2514d40
+﻿@baseUrl = http://localhost:5158
+
+### S0. مستخدم الجلسة — مرة واحدة فقط. المتوقع: 201
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Session User",
+  "email": "session@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
+### S1. دخول — شغّله أولًا في كل جلسة عمل. المتوقع: 200
+# @name s
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### S2. مستخدم ثانٍ لإثبات العزل — مرة واحدة. المتوقع: 201
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Other User",
+  "email": "other@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
+### S3. دخول المستخدم الثاني. المتوقع: 200
+# @name other
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "other@test.com", "password": "Password123" }
 
 ### 1. تسجيل صحيح - المتوقع: 201 Created
 POST {{baseUrl}}/api/auth/register
@@ -36,14 +71,14 @@ Content-Type: application/json
 ### 4. إنشاء كورس - المتوقع: 201
 POST {{baseUrl}}/api/courses
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 {
   "title": "OOP 101",
   "description": "Object oriented programming"
 }
 
-### 5. بلا ترويسة الهوية - المتوقع: 403
+### 5. بلا توكن - المتوقع: 401 (كان 403 قبل M6)
 POST {{baseUrl}}/api/courses
 Content-Type: application/json
 
@@ -54,7 +89,7 @@ Content-Type: application/json
 ### 6. عنوان فارغ - المتوقع: 400
 POST {{baseUrl}}/api/courses
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 {
   "title": ""
@@ -62,81 +97,525 @@ X-User-Id: {{userId}}
 ### 7. ملاحظة جذر - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Lecture 1 notes", "content": "Polymorphism basics" }
 
 ### 8. ملاحظة تحت كورس - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Under course", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
 
 ### 9. ملاحظة تحت ملاحظة - المتوقع: 201، والعمق 1
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Nested", "parentItemId": "f9c96308-f28b-4113-b7ae-78de07b7801c" }
 
 ### 10. أب غير موجود - المتوقع: 404
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Orphan", "parentItemId": "99999999-9999-9999-9999-999999999999" }
 
 ### 11. أب وكورس معًا - المتوقع: 400
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Both", "parentItemId": "f9c96308-f28b-4113-b7ae-78de07b7801c", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
 ### 12. مهمة جذر - المتوقع: 201
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Review chapter 3", "priority": 2 }
 
 ### 13. مهمة تحت ملاحظة - المتوقع: 201، والعمق 1
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Task under note", "parentItemId": "688a99a7-79a5-4f6e-8a30-9780256ed348" }
 
 ### 14. أولوية غير صالحة - المتوقع: 400
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Bad priority", "priority": 99 }
 ### 15. ملاحظة تحت الكورس - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Level 0", "courseId": "d066a657-06b9-40ca-acc0-c6038305dab7" }
 
 ### 16. مهمة تحتها - المتوقع: 201
 POST {{baseUrl}}/api/tasks
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Level 1", "parentItemId": "e40b0466-7424-48b8-b370-ee0a7fcf15c9" }
 
 ### 17. ملاحظة تحت المهمة - المتوقع: 201
 POST {{baseUrl}}/api/notes
 Content-Type: application/json
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 
 { "title": "Level 2", "parentItemId": "01a52370-5f9c-43c8-922e-bb208fed385a" }
 
 ### 18. حذف الوسطى (Level 1) - المتوقع: 204
 DELETE {{baseUrl}}/api/items/01a52370-5f9c-43c8-922e-bb208fed385a
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
 ### 19. حذف الكورس - المتوقع: 204
 DELETE {{baseUrl}}/api/courses/d066a657-06b9-40ca-acc0-c6038305dab7
-X-User-Id: {{userId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### تاريخ بإزاحة — المتوقع قبل الإصلاح: 500
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Offset date", "dueDate": "2026-10-01T14:00:00+03:00" }
+
+### تاريخ بلا إزاحة — المتوقع قبل الإصلاح: 500
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Naive date", "dueDate": "2026-10-01T14:00:00" }
+
+### عزل: مهمة بلا تاريخ
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "No date at all" }
+
+### D0 — جذر، عمق 0
+# @name note0
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Depth 0" }
+
+### D1 — عمق 1
+# @name note1
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Depth 1", "parentItemId": "{{note0.response.body.$.noteId}}" }
+
+### D2 — عمق 2
+# @name note2
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Depth 2", "parentItemId": "{{note1.response.body.$.noteId}}" }
+
+### D3 — عمق 3
+# @name note3
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Depth 3", "parentItemId": "{{note2.response.body.$.noteId}}" }
+
+### D4 — عمق 4، آخر مستوى مسموح
+# @name note4
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Depth 4", "parentItemId": "{{note3.response.body.$.noteId}}" }
+
+### D5 — السادس: المتوقَّع قبل الإصلاح 500، وبعده 409
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Depth 5 - should fail", "parentItemId": "{{note4.response.body.$.noteId}}" }
+
+### ───────── M6: المصادقة ─────────
+
+### A1. طلب محمي بلا توكن — المتوقع: 401
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+
+{ "title": "No token" }
+
+### A2. طلب محمي بترويسة الهوية القديمة وحدها — المتوقع: 401 (الثغرة مغلقة)
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+X-User-Id: da3b243e-8356-4c2d-8dee-e93a2af308aa
+
+{ "title": "Old bypass" }
+
+### A3. طلب محمي بتوكن صالح — المتوقع: 201
+# @name course
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "Auth works", "description": "created with a real token" }
+
+### A4. توكن مشوَّه — المتوقع: 401
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+Authorization: Bearer not.a.real.token
+
+{ "title": "Broken token" }
+
+### A5. عزل: المستخدم الثاني يحذف كورس الأول — المتوقع: 403
+DELETE {{baseUrl}}/api/courses/{{course.response.body.$.courseId}}
+Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### A6. نقطة مجهولة ما زالت مفتوحة — المتوقع: 200
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### ───────── M6: الخروج ─────────
+
+### X1. دخول جهاز أول
+# @name deviceA
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### X2. دخول جهاز ثانٍ
+# @name deviceB
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "session@test.com", "password": "Password123" }
+
+### X3. خروج الجهاز الأول — المتوقع: 204
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{deviceA.response.body.$.accessToken}}
+
+{ "refreshToken": "{{deviceA.response.body.$.refreshToken}}" }
+
+### X4. خروج مكرّر بالتوكن نفسه — المتوقع: 204 لا 500
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{deviceA.response.body.$.accessToken}}
+
+{ "refreshToken": "{{deviceA.response.body.$.refreshToken}}" }
+
+### X5. تجديد بتوكن الجهاز الأول بعد خروجه — المتوقع: 401
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{deviceA.response.body.$.refreshToken}}" }
+
+### X6. تجديد بتوكن الجهاز الثاني — المتوقع: 200
+###     توكن X5 أُلغي بالخروج لا بالتدوير، فلا كشف إعادة استخدام ولا إلغاء جماعي (A23)
+# @name rotated
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{deviceB.response.body.$.refreshToken}}" }
+
+### X7. خروج بلا توكن وصول — المتوقع: 401
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+
+{ "refreshToken": "some-token" }
+
+### X8. خروج بتوكن تجديد null — المتوقع: 400 لا 500 (المدقّق يعمل الآن، D10)
+POST {{baseUrl}}/api/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "refreshToken": null }
+
+### X9. إعادة توكن الجهاز الثاني الذي دوّره X6 — المتوقع: 401، وإلغاء كل جلسات المستخدم
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{deviceB.response.body.$.refreshToken}}" }
+
+### X10. التوكن الخلف الذي أصدره X6 — المتوقع: 401 (ألغاه كشف السرقة في X9)
+POST {{baseUrl}}/api/auth/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{rotated.response.body.$.refreshToken}}" }
+
+### ───────── M6: الإدارة (UC-09) ─────────
+###  يحتاج مسؤولًا مبذورًا من AdminSeed:* في user-secrets (README، الخطوة 3b).
+###  ضع بياناته هنا مرة واحدة
+@adminEmail = admin@example.com
+@adminPassword = CHANGE-ME
+
+### ADM-S. The account this section consumes — expected: 201 the first time, 409 afterwards.
+### Both are fine: it only has to exist before ADM1.
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "fullName": "Admin Target",
+  "email": "adm-target@test.com",
+  "password": "Password123",
+  "confirmPassword": "Password123"
+}
+
+### ADM0. دخول المسؤول — المتوقع: 200
+# @name admin
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "{{adminEmail}}", "password": "{{adminPassword}}" }
+
+### ADM0b. The id of the account this section deactivates — from psql:
+###   SELECT "Id" FROM "Users" WHERE "Email" = 'adm-target@test.com';
+@admTargetId = 00000000-0000-0000-0000-000000000000
+
+### ADM1. بلا توكن — المتوقع: 401
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
+
+### ADM2. مستخدم عادي — المتوقع: 403
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### ADM3. مسؤول — المتوقع: 204، وpsql يُظهر IsActive = false
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
+Authorization: Bearer {{admin.response.body.$.accessToken}}
+
+### ADM4. تكرار — المتوقع: 204 (Deactivate متسامحة)
+PATCH {{baseUrl}}/api/admin/users/{{admTargetId}}/deactivate
+Authorization: Bearer {{admin.response.body.$.accessToken}}
+
+### ADM5. معرّف غير موجود — المتوقع: 404
+PATCH {{baseUrl}}/api/admin/users/3f2b8c1e-9a4d-4e6b-8c7a-1d2e3f4a5b6c/deactivate
+Authorization: Bearer {{admin.response.body.$.accessToken}}
+
+### ADM6. المعطَّل يحاول الدخول — المتوقع: 401
+###       Warning: this consumes adm-target@test.com for good — there is no reactivation
+###       endpoint. It no longer touches the shared other@test.com, which A5, M7-18, M8-8
+###       and M8-9 log in as (G5). To run this section again, reactivate it from psql:
+###       UPDATE "Users" SET "IsActive" = true WHERE "Email" = 'adm-target@test.com';
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "adm-target@test.com", "password": "Password123" }
+
+### ───────── M7: القراءة والتعديل ─────────
+###  كلها بتوكن S1. السلسلة: كورس ← ملاحظة تحته ← مهمة تحت الملاحظة، ثم قراءة وتعديل
+
+### M7-1. إنشاء كورس — المتوقع: 201
+# @name m7course
+POST {{baseUrl}}/api/courses
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 course", "description": "read and update" }
+
+### M7-2. ملاحظة تحت الكورس — المتوقع: 201
+# @name m7note
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 note", "courseId": "{{m7course.response.body.$.courseId}}" }
+
+### M7-3. مهمة تحت الملاحظة — المتوقع: 201
+# @name m7task
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 task", "parentItemId": "{{m7note.response.body.$.noteId}}" }
+
+### M7-4. المستخدم الحالي — المتوقع: 200
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-5. قائمة الكورسات — المتوقع: 200 و items و totalCount
+GET {{baseUrl}}/api/courses?page=1&pageSize=20
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-6. حجم صفحة فوق الحد — المتوقع: 400 لا قصّ صامت
+GET {{baseUrl}}/api/courses?page=1&pageSize=101
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-7. شجرة الكورس — المتوقع: 200 وعنصران مرتّبان بالعمق
+GET {{baseUrl}}/api/courses/{{m7course.response.body.$.courseId}}/tree
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-8. العناصر المستقلة — المتوقع: 200 (ما تحت كورس لا يظهر هنا)
+GET {{baseUrl}}/api/items?page=1&pageSize=20
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-9. عنصر واحد — المتوقع: 200 و kind = 1 و status = 0
+GET {{baseUrl}}/api/items/{{m7task.response.body.$.taskId}}
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-10. شجرة الملاحظة — المتوقع: 200 والملاحظة ثم المهمة
+GET {{baseUrl}}/api/items/{{m7note.response.body.$.noteId}}/tree
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-11. تعديل الكورس — المتوقع: 204، والوصف null يُمسح
+PUT {{baseUrl}}/api/courses/{{m7course.response.body.$.courseId}}
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 course (renamed)", "description": null }
+
+### M7-12. تعديل محتوى الملاحظة — المتوقع: 204
+PATCH {{baseUrl}}/api/items/{{m7note.response.body.$.noteId}}
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "title": "M7 note (edited)", "content": "now with a body" }
+
+### M7-13. حالة المهمة — المتوقع: 204
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/status
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "status": 2 }
+
+### M7-14. جدول المهمة — المتوقع: 204
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/schedule
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "priority": 2, "dueDate": "2026-10-01T14:00:00Z" }
+
+### M7-15. تاريخ بإزاحة — المتوقع: 400 (§14.1)
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/schedule
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "priority": 2, "dueDate": "2026-10-01T14:00:00+03:00" }
+
+### M7-16. حالة على معرّف ملاحظة — المتوقع: 404
+PATCH {{baseUrl}}/api/tasks/{{m7note.response.body.$.noteId}}/status
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "status": 1 }
+
+### M7-17. قراءة الشجرة بعد التعديل — المتوقع: 200 والقيم الجديدة
+GET {{baseUrl}}/api/courses/{{m7course.response.body.$.courseId}}/tree
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M7-18. عزل: المستخدم الثاني يقرأ عنصر الأول — المتوقع: 403 (ADR-33)
+GET {{baseUrl}}/api/items/{{m7task.response.body.$.taskId}}
+Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### M7-19. حالة بلا حقل status — المتوقع: 400 لا 204 بصمت (A24)
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/status
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ }
+
+### M7-20. جدول بلا حقل priority — المتوقع: 400 (A24)
+PATCH {{baseUrl}}/api/tasks/{{m7task.response.body.$.taskId}}/schedule
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{ "dueDate": null }
+
+### M8-1. A note with a body to work on — expected: 201
+# @name m8note
+POST {{baseUrl}}/api/notes
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{
+  "title": "موضوع الثقوب السوداء",
+  "content": "تعتبر الثقوب السوداء من أعظم الأسرار الكونية، وهي مناطق تتمتع بجاذبية هائلة تبتلع كل ما يقترب منها حتى الضوء، حيث تتكون هذه الظاهرة غالباً عندما تنهار النجوم الضخمة على نفسها في نهاية دورة حياتها لتشكل نقطة ذات كثافة لا نهائية، ورغم استحالة رؤيتها بشكل مباشر، يدرك العلماء وجودها عبر مراقبة تأثير جاذبيتها الشديدة على النجوم والغازات المحيطة بها."
+}
+
+### M8-2. Summarize the note — expected: 200 with summary and tokensUsed
+# @name m8summary
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-3. Extract task suggestions — expected: 200 with suggestions and tokensUsed
+# @name m8suggestions
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-4. Approve one suggestion — expected: 201. Nothing was created until this call (ADR-28)
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+{
+  "title": "{{m8suggestions.response.body.$.suggestions[0].title}}",
+  "content": "{{m8suggestions.response.body.$.suggestions[0].content}}",
+  "parentItemId": "{{m8note.response.body.$.noteId}}"
+}
+
+### M8-5. The counter grew by what was recorded — expected: 200, tokensUsedThisMonth above zero
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-6. A task's id on a note's route — expected: 404
+POST {{baseUrl}}/api/notes/{{m7task.response.body.$.taskId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-7. A task's id on the extraction route — expected: 404
+POST {{baseUrl}}/api/notes/{{m7task.response.body.$.taskId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-8. Another user's note, summarize — expected: 403 (ADR-33)
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### M8-9. Another user's note, extract — expected: 403
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{other.response.body.$.accessToken}}
+
+### M8-10. Extract from a note at depth 4 — expected: 409 (ADR-26). Send D0…D4 above first
+POST {{baseUrl}}/api/notes/{{note4.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-11. Summarize the same depth-4 note — expected: 200. A summary creates nothing
+POST {{baseUrl}}/api/notes/{{note4.response.body.$.noteId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-12. Quota too small — expected: 429.
+# Raise Ai:ResponseReserveTokens in appsettings.Development.json above what this user has
+# left, restart the API, send this once, then put the value back.
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-13. Provider failure — expected: 502, and nothing recorded.
+# Set Ai:FakeFailure to true in appsettings.Development.json, restart the API, send this
+# once, then put it back to false.
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/extract-tasks
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M8-14. Without a token — expected: 401
+POST {{baseUrl}}/api/notes/{{m8note.response.body.$.noteId}}/summarize
+
+### ───────── M9: the dashboard (UC-08) ─────────
+###  All with the S1 token unless stated. The numbers depend on what this file has already
+###  created, so read the response against §15.4 rather than against a fixed table.
+
+### M9-1. The caller's dashboard — expected: 200 with counts, urgentTasks and recentCourses
+GET {{baseUrl}}/api/dashboard
+Authorization: Bearer {{s.response.body.$.accessToken}}
+
+### M9-2. Without a token — expected: 401
+GET {{baseUrl}}/api/dashboard
+
+### M9-3. The second user's dashboard — expected: 200 with their own numbers only (ADR-33)
+GET {{baseUrl}}/api/dashboard
+Authorization: Bearer {{other.response.body.$.accessToken}}

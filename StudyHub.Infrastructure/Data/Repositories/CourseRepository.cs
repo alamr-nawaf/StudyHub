@@ -4,6 +4,9 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Infrastructure.Data.Repositories;
 
+/// <summary>
+/// EF Core implementation of <see cref="StudyHub.Application.Common.Interfaces.ICourseRepository"/>.
+/// </summary>
 public class CourseRepository : ICourseRepository
 {
     private readonly StudyHubDbContext _context;

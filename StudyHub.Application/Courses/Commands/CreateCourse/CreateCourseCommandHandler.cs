@@ -4,6 +4,9 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Courses.Commands.CreateCourse;
 
+/// <summary>
+/// Creates a course owned by the current user and returns its id.
+/// </summary>
 public class CreateCourseCommandHandler : IRequestHandler<CreateCourseCommand, Guid>
 {
     private readonly ICourseRepository _courseRepository;

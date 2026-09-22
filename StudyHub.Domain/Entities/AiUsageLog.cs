@@ -2,7 +2,10 @@
 
 namespace StudyHub.Domain.Entities;
 
-// يرث BaseEntity لا AuditableEntity: سجل يُكتب مرة ولا يُعدَّل أبدًا
+/// <summary>
+/// One recorded AI call, and since M8.1 the only record of a user's usage (ADR-39). It
+/// inherits BaseEntity rather than AuditableEntity: the row is written once and never edited.
+/// </summary>
 public sealed class AiUsageLog : BaseEntity
 {
     public Guid UserId { get; private set; }
@@ -28,6 +31,7 @@ public sealed class AiUsageLog : BaseEntity
             OperationType = operationType.Trim(),
             TokensConsumed = tokensConsumed
         };
-        // وقت العملية = CreatedAt الموروث. كان الحقلان يُملآن باللحظة نفسها.
+        // The instant of the call is the inherited CreatedAt: a separate field would only
+        // have repeated it, because both were always filled with the same value.
     }
 }

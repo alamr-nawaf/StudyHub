@@ -5,6 +5,10 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Notes.Commands.CreateNote;
 
+/// <summary>
+/// Creates a note, under a parent item or a course or neither, after checking that whatever
+/// it is attached to belongs to the caller and can still take a child.
+/// </summary>
 public class CreateNoteCommandHandler : IRequestHandler<CreateNoteCommand, Guid>
 {
     private readonly IItemRepository _itemRepository;
@@ -35,9 +39,11 @@ public class CreateNoteCommandHandler : IRequestHandler<CreateNoteCommand, Guid>
             parent = await _itemRepository.GetByIdAsync(request.ParentItemId.Value, cancellationToken)
                 ?? throw new NotFoundException($"Parent item '{request.ParentItemId}' was not found.");
 
-            // 403 لا 404: الرسالة تفرّق بين "غير موجود" و"ليس لك"
+            // 403, not 404: the message tells "does not exist" apart from "not yours"
             if (parent.UserId != userId)
                 throw new ForbiddenException("You do not own the parent item.");
+            if (parent.IsAtMaxDepth)
+                throw new ConflictException("The parent item is at the maximum depth.");
         }
         else if (request.CourseId.HasValue)
         {
@@ -48,7 +54,9 @@ public class CreateNoteCommandHandler : IRequestHandler<CreateNoteCommand, Guid>
                 throw new ForbiddenException("You do not own this course.");
         }
 
-        // الكيان يعيد فحص الملكية والعمق والحذف — الطبقة الأخيرة
+
+        // The entity checks ownership, depth and deletion again: the last layer, and the
+        // only one that cannot be forgotten by a caller
         var note = Note.Create(userId, request.Title, request.Content, parent, request.CourseId);
 
         _itemRepository.Add(note);

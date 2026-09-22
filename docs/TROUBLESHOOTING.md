@@ -34,6 +34,7 @@ A record of every technical problem hit during development, how it was fixed, an
 **Problem**: `StudyHub.API.http` expects 409 for a duplicate email and 400 for invalid input. Both returned 500 with a stack trace, because nothing caught `ConflictException` or `ValidationException` at the boundary.
 **Fix**: Added `NotFoundException` and `ForbiddenException` to Application, and a `GlobalExceptionHandler` (`IExceptionHandler` + `AddProblemDetails`) in the API mapping each type to a status code and a `ProblemDetails` body.
 **Why**: An exception type carries meaning only inside the process. Without a translation layer at the edge, every deliberate business rule arrives at the client as an anonymous server failure.
+**Repeat (M5.1)**: The same shape, narrowed. `GlobalExceptionHandler` now covers the four Application exception types, but a domain invariant that throws `InvalidOperationException` still fell through to 500 — nesting under a parent already at maximum depth was one. Published the rule as `Item.IsAtMaxDepth` so the handler can ask it and return 409, and pointed `Initialize` at the same member so the rule exists once; `>= MaxDepth` now appears exactly once in the whole project. The entity guard stays: if it ever fires, a handler forgot to ask, and 500 is the honest answer to a bug.
 
 ### A6. `ValidationBehavior` violated the project's own async standard (M5)
 **Problem**: Found during code review — no runtime error. The behavior called the synchronous `Validate()` and never passed `CancellationToken`, against the rule in `CODING_STANDARDS.md` §2.
@@ -95,6 +96,56 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: Kept the subtree walk in LINQ, looping level by level. Raw SQL would have cost a hand-maintained query string, a result shape EF constrains, and — critically — a query the soft-delete filter does not touch at all.
 **Why**: "One query per level" is only alarming when the number of levels is unknown. A bound turns an unbounded cost into a constant, and an optimization justified by the unbounded case stops being justified with it.
 
+### A18. A value converter validated on the way out of the database (M5.1)
+**Problem**: Found during code review — no runtime error yet. `UserConfiguration` rebuilt the `Email` value object with `Email.Create`, which throws on a malformed address. Any row whose email column was corrupted by a manual `UPDATE`, an import, or a future migration would make every read of that user throw — including the login lookup — turning a rejected credential into a 500.
+**Fix**: Added `Email.FromPersisted`, a non-validating factory, and pointed the converter at it. `Email.Create` stays on every entry path. One test asserts that `FromPersisted` passes an invalid value through untouched, so the difference between the two factories reads as deliberate rather than as a forgotten check.
+**Why**: A converter is a mapping, not a gate. Validation belongs where untrusted input enters the system; running it again on the way out re-judges data the system already accepted, and turns one bad row into a total outage for its owner instead of a single rejection. Same shape as D4, in a different place.
+
+### A19. A client date without a UTC offset reached the database as a 500 (M5.1)
+**Problem**: Found during code review, then reproduced. `POST /api/tasks` with `"dueDate": "2026-10-01T14:00:00"` — or with an explicit offset like `+03:00` — returned 500. Npgsql refuses to write a `DateTime` whose `Kind` is not `Utc` to a `timestamptz` column, and the JSON reader produces `Unspecified` for a naive value and `Local` for an offset one. No request in `StudyHub.API.http` had ever sent a `dueDate`, which is the only reason it went unnoticed.
+**Fix**: Added a UTC rule to `CreateTaskCommandValidator` rejecting any `Kind` other than `Utc`, with six validator tests covering it and the course-inheritance rule beside it. `DueDate` is the only `DateTime` reaching the API from a client; every other timestamp is written by an entity from `DateTime.UtcNow`.
+**Why**: A rule that lives only in a driver's write path surfaces as a server error instead of a rejection. The boundary that accepts a value is the boundary that must judge it — and an input shape nothing in the manual test file ever sends is an input shape nobody has verified.
+
+### A20. The implementation plan dropped a claim the requirements had already decided (M6)
+**Problem**: Caught while reviewing the M6 plan, before any file was written. `Requirements.md` §9.1 (decision 5), ADR-21 and the §11 roadmap row all state the access token carries `sub`, `jti` and `role`. The plan's step 6.2 defined `GenerateAccessToken(Guid userId, DateTime utcNow)` — no parameter the role could travel through — and step 6.3 named its proof `GenerateAccessToken_ShouldCarrySubAndJtiOnly`. Nothing would have gone red: the token would be issued, login would return 200, and the gap would surface only in the last session of M6, when a policy asked for a claim no token carried.
+**Fix**: Added `UserRole` to the signature, renamed the test to `GenerateAccessToken_ShouldCarrySubJtiAndRole`, fixed both plan steps in the same session, and fixed the claim value to the enum name rather than its number.
+**Why**: The plan decides order and proof; the requirements decide content. A plan that silently *narrows* a decided requirement is harder to catch than one that contradicts it, because every step still reads as complete on its own. Same shape as D6: found by reading a plan against its reference, not by running code.
+
+### A21. An interface defined one session before its only consumer could not serve it (M6)
+**Problem**: `ITokenService` was written in 6.2 and proven in 6.3, a full session before the login handler existed. When the handler was finally written it needed two things the contract could not give it: the refresh-token lifetime, which lives in `JwtSettings` inside Infrastructure and is invisible to Application, and a dummy BCrypt hash to compare against when no user is found. Both gaps compiled and both surfaced only while writing the consumer.
+**Fix**: `GenerateRefreshToken` now takes `utcNow` and returns a `RefreshTokenResult` carrying the raw token, its hash and its expiry; `IPasswordHasher` gained a `DummyHash` member backed by a `static readonly` hash generated at the same work factor. One test in `TokenServiceTests` changed shape; none was added or lost.
+**Why**: An interface is a guess about a caller that does not exist yet, and the guess is only checked when the caller is written. Writing the contract early is still worth it — it keeps the layers honest — but the session that first consumes it must be free to amend it, and the amendment is not a failure of the earlier session. The second gap has a rule of its own: a value whose *format* belongs to one layer must be produced by that layer. A hand-written BCrypt literal in the handler would have parsed, returned false quickly, and silently restored the timing leak that rule 3 of §9.2 exists to close.
+
+### A22. A vertical slice named after an entity hid that entity from its own layer (M6)
+**Problem**: The refresh slice was created as `Auth/Commands/RefreshToken/`, following the folder name written in Requirements §6. That declares a namespace member `RefreshToken` under `Auth.Commands`, which shadows the domain entity of the same name for **every** file under `Auth.Commands` — not only the ones inside the new folder. The logout tests, which had compiled before and were not edited, began reporting CS0118 on a `using StudyHub.Domain.Entities;` that had become inert.
+**Fix**: Renamed the slice to `Auth/Commands/Refresh/` and removed the `DomainRefreshToken` aliases that had been added as a first response. Requirements §6 was corrected in the same session.
+**Why**: The first fix — an alias in each affected file — worked and was wrong: it pays a recurring tax and leaves the cause invisible to whoever writes the next file under `Auth`. Name a slice after the operation (`Refresh`) rather than the entity it touches, and the collision cannot occur. Note also where the error appeared: in a file nobody had edited. A namespace declaration changes name resolution for its whole parent, so the failing file is not always the changed one.
+
+### A23. Any revoked refresh token could sign its owner out of every device (M6)
+**Problem**: Found during code review — no runtime error. Reuse detection fired on `RevokedAt is not null`, so a token ended by *logout* counted as stolen. Anyone holding an old logged-out token could revoke all of a user's sessions at will, and a refresh still in flight when the user tapped logout signed them out of their other devices.
+**Fix**: `RefreshTokenCommandHandler` now runs reuse detection only when `ReplacedByTokenId` is set — revoked by rotation. A token revoked without a successor gets a plain 401. The handler tests were split into rotated and logged-out cases; Requirements §9.3 was updated.
+**Why**: A security response that anyone can trigger is an attack surface of its own. The signal was "an old copy of a *live* chain"; the field that tells a live chain from a dead one already existed and was not consulted.
+
+### A24. A task update field left out of the body silently reset the value (M7)
+**Problem**: Found while writing the M7 report — no runtime error, all tests green. `Status` and `Priority` were non-nullable enums on `UpdateTaskStatusCommand` and `UpdateTaskScheduleCommand`, so a body omitting the field bound as `0` and passed `IsInEnum()`. `PATCH /api/tasks/{id}/schedule` with `{ "dueDate": null }` returned 204 and quietly set the priority to `Low`; the same shape on `/status` set `Pending`.
+**Fix**: Made both properties nullable, and put `.Cascade(CascadeMode.Stop).NotNull().IsInEnum()` on each in its validator, so an absent field is one 400 with `'Status' must not be empty.`; the handlers pass `request.Status!.Value`. Added a validator test per field and confirmed 400 against the running API, with the task's stored values unchanged.
+**Why**: A non-nullable value type cannot express "the client did not send this". The default is indistinguishable from a deliberate `0`, and a validator that only checks the *range* accepts it — so the strictest possible enum check still lets a silent reset through. Where absence must be refused, the type has to be able to represent absence first. Note that `DueDate` is the opposite case: there, `null` is a deliberate value that clears the date.
+
+### A25. The provider response was read as if no model ever thinks (M8)
+**Problem**: Found during code review before the first real Gemini call — no runtime error, because only the fake provider had ever answered. The parser read `candidates[0].content.parts[0].text`. A reasoning model returns its thinking as extra parts marked `thought`, so `parts[0]` would have been the *reasoning*, handed back as the summary; and when such a model exhausts `maxOutputTokens` while still thinking it returns a candidate with no `content` at all, which would have thrown inside the `try` and become a 502 naming nothing.
+**Fix**: Walk every part, skip the ones marked `thought`, concatenate the rest, and treat each step down the response as optional. `finishReason` is logged when an answer cannot be read, with a dedicated message for `MAX_TOKENS`; a non-success status logs the first 500 characters of the body. `Ai:ThinkingBudget` and `Ai:ThinkingLevel` pass a thinking cap through to the provider, and are absent unless configured. Nine tests in `GeminiAiServiceTests` drive real thinking-model payloads through a stub `HttpMessageHandler`.
+**Why**: Code written against one provider response is written against *one example* of it. The shape an external API is allowed to return is wider than the shape it happened to return, and the parts of a response that are optional are exactly the parts that appear first in production. Walk what a contract permits, not what a sample showed.
+
+### A26. A requirements section still described a method the previous milestone had removed (M8.1)
+**Problem**: Found during code review — no runtime error. After M8, Requirements §3.3 still listed `User.ConsumeTokens` and promised a `RecordTokenUsage` method, while the code had `HasQuotaFor` plus an atomic SQL record (ADR-37), and §15.1 of the same document already said so. §7 also still called the counter's concurrency "open".
+**Fix**: Rewrote §3.3, §7 and §15.1 in M8.1, together with the removal of the counter.
+**Why**: A plan lists the sections its author remembered; a search lists the sections that exist. When a milestone removes or renames a member, search every document for the old name before closing the milestone.
+
+### A27. A monthly counter reset lazily showed last month's usage (M8.1)
+**Problem**: Found during code review — no runtime error yet. `TokensUsedThisMonth` was reset only by the user's next AI call, and `GET /api/auth/me` read it without the month rule, so from the first of a month until that call it reported the previous month's usage. The same lazy reset raced the atomic increment at the boundary (ADR-37).
+**Fix**: Removed the counter and `LastTokenResetDate`; monthly usage is now the sum of the month's `AiUsageLogs` rows, and the month starts at Riyadh midnight (ADR-39, ADR-40).
+**Why**: A stored aggregate with an expiry is a cache, and every reader must know when it expires. When the history it summarizes is already stored and indexed, compute from the history instead of keeping a second copy that can drift.
+
 ---
 
 ## B. Configuration & Wiring
@@ -138,6 +189,21 @@ A record of every technical problem hit during development, how it was fixed, an
 **Problem**: `ItemRepository.cs` was placed in `StudyHub.Application/Common/Interfaces/` beside its interface. It failed to compile: `Microsoft.EntityFrameworkCore` does not exist in that project, and neither does `StudyHubDbContext`.
 **Fix**: Deleted it and recreated it under `StudyHub.Infrastructure/Data/Repositories/`, leaving only `IItemRepository` in Application.
 **Why**: The dependency rule made the mistake impossible to commit — Application has no reference to EF Core, so the compiler rejected the file the moment it landed in the wrong project. Interfaces are declared where they are needed; implementations live where their dependencies are permitted.
+
+### B9. Authentication was wired but no content endpoint required it (M6)
+**Problem**: Found during code review. `JwtBearer` validated tokens, yet only the `debug-claims` actions carried `[Authorize]`. A request with no token, a malformed token, or the old `X-User-Id` header reached the handler anonymously and failed in `CurrentUserService` as **403**, not 401 — and `DELETE /api/courses/{id}` answered 404 or 403 depending on whether the id existed.
+**Fix**: A `FallbackPolicy` requiring an authenticated user in `Program.cs`, with `[AllowAnonymous]` on register, login, refresh, and `MapOpenApi()`. Verified over HTTP: all three cases return 401.
+**Why**: Authentication identifies the caller; only authorization *refuses* one. Registering the scheme protects nothing on its own. Make protection the default and exposure the declaration, so a forgotten attribute fails closed.
+
+### B10. The API refused to start because user secrets were never read (M8)
+**Problem**: Starting the API for the M8 run with `dotnet run --no-launch-profile --urls http://localhost:5158` stopped immediately with `Database connection string is not configured.` — the same message as a missing secret, although `dotnet user-secrets list` showed the connection string.
+**Fix**: Start it with the environment set: `ASPNETCORE_ENVIRONMENT=Development dotnet run --project StudyHub.API --no-launch-profile --urls ...`. The application then started, logged `AI provider in use: FakeAiService.` and served every M8 request.
+**Why**: User secrets are only added to configuration in the Development environment, and `--no-launch-profile` discards the profile that sets it, so the environment silently became Production. A configuration value is not "set" in the abstract: it is set *for one environment*, and skipping the launch profile skips everything the profile was providing.
+
+### B11. The test host's configuration arrived too late to be seen (M10)
+**Problem**: The first run of the integration suite failed on every test with `Database connection string is not configured.`, although `WebApplicationFactory` supplied one. `ConfigureWebHost` added it with `ConfigureAppConfiguration`, and with the minimal hosting model `Program.cs` reads `builder.Configuration` while the host is being created — before that callback runs.
+**Fix**: The test host supplies every value with `builder.UseSetting(key, value)`, which is part of the configuration from the start, so `AddInfrastructureServices` sees it.
+**Why**: The same shape as B3: two configuration paths that look interchangeable are not. With top-level statements the application's own startup code runs *inside* host creation, so anything it reads has to exist before the builder is built, not merely before the first request.
 
 ---
 
@@ -198,6 +264,7 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: Wrapped the call in `try/catch (SaltParseException)` returning `false`.
 **Why**: A verification function has exactly two correct answers. Any third outcome — an exception included — converts a rejected login into a server error, and hands the caller a distinction it should never see.
 **Correction**: this entry was written before the change was applied. The file was not actually edited until later in M5, and nothing detected the gap. See G4.
+**Repeat (M5.1)**: The original `catch (SaltParseException)` was too narrow. A unit test over five malformed shapes found two that escape it: an empty string raises `ArgumentException` from the library's own guard, and a truncated hash like `$2a$12$short` passes the version check then raises `ArgumentOutOfRangeException` from a `Substring` inside `HashPassword`. Added an early `IsNullOrWhiteSpace` guard and widened the catch to `SaltParseException or ArgumentException`, which covers the out-of-range subclass and any corrupt shape not yet seen. The lesson beneath the lesson: the first fix was verified by reading the code, which can only confirm the failure mode you already imagined — the shapes a corrupt row actually takes are found by trying them.
 
 ### D5. BCrypt silently ignores every byte past the first 72 (M5)
 **Problem**: Found during code review. The algorithm truncates its input at 72 bytes with no error, so two long passwords sharing their first 72 bytes authenticate each other. `MaximumLength(72)` in the validator would not have closed the gap either — FluentValidation counts characters, and one Arabic character is two bytes.
@@ -209,6 +276,32 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: Found during code review, while adding the `Email` value object. With a value converter in place, EF Core sees one text column and knows nothing about the object's inner property — a query filtering on `u.Email.Value` compiles cleanly and fails at runtime.
 **Fix**: Built the `Email` before the query and compared the whole object: `u.Email == normalized`.
 **Why**: A value converter maps the type, not its members. Anything a query asks of the object beyond equality has no SQL to be translated into.
+**Repeat (M5.2)**: The planned `AdminSeeder` filtered with `u.Email.Value == normalized` and re-implemented the trimming and lower-casing that `Email` already owns (A9). Caught while reviewing the plan, before the file was written. Corrected to build the `Email` first and compare the whole object.
+
+### D7. A package version arrived through a dev-only dependency and stopped at the project boundary (M5.1)
+**Problem**: `MSB3277` — conflicting versions of `Microsoft.EntityFrameworkCore.Relational`, 10.0.4 against 10.0.11 — appeared the moment `StudyHub.Infrastructure.Tests` was added. `StudyHub.Infrastructure` itself had built cleanly for weeks. `dotnet list package --include-transitive` showed 10.0.11 inside Infrastructure and 10.0.4 inside the test project, from the same graph.
+**Fix**: Added an explicit `PackageReference` to `Microsoft.EntityFrameworkCore.Relational` in `StudyHub.Infrastructure`, without `PrivateAssets`, so it flows to consuming projects.
+**Why**: The higher version was reaching Infrastructure only through `Microsoft.EntityFrameworkCore.Design`, which carries `PrivateAssets: all` and therefore does not cross a project reference. A project that uses a package's API — `HasCheckConstraint` and `HasFilter` come from Relational — must declare it; relying on a transitive path means the version is decided by a graph whose shape changes depending on who is looking at it.
+
+### D8. An extension method was missing because of an absent assembly, not a missing `using` (M6)
+**Problem**: `.Bind(configuration.GetSection(...))` on `OptionsBuilder<JwtSettings>` failed with CS1061 in `StudyHub.Infrastructure`, although the namespace was already imported and `GetSection` and `GetConnectionString` compiled in the same file.
+**Fix**: Added `Microsoft.Extensions.Options.ConfigurationExtensions` to `StudyHub.Infrastructure`, matching the `10.0.x` family the other packages use.
+**Why**: A `using` only surfaces what the project already references. EF Core drags `Configuration.Abstractions` in transitively — which is why the neighbouring configuration calls compiled — so an absent assembly reads exactly like a forgotten import. Two identical-looking failures, two different fixes.
+
+### D9. A Fluent API call written into the plan had been removed from the provider (M6)
+**Problem**: `builder.UseXminAsConcurrencyToken()` does not exist in `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3. It was obsoleted in version 7.0 in favour of the standard `IsRowVersion()` API, then deleted. Caught before the file was written, by checking the release notes of the installed version.
+**Fix**: Configured a `uint` shadow property named `xmin`, typed `xid` and marked `IsRowVersion()`, in `RefreshTokenConfiguration`. The generated migration came out empty and `\d "RefreshTokens"` shows no added column, which is the intended result.
+**Why**: A plan ages against the packages it names, and provider-specific APIs are the first to move. Read the release notes of the *installed* version before copying a Fluent API call — a documentation page that matches the method name may describe a version you are not running.
+
+### D10. The validation pipeline silently skipped every command without a result (M6)
+**Problem**: Found during code review. `ValidationBehavior` was constrained `where TRequest : IRequest<TResponse>`. In MediatR 12+, `IRequest` inherits only `IBaseRequest`, not `IRequest<Unit>`, so the container skipped the behaviour for `LogoutCommand`, `DeleteCourseCommand`, and `DeleteItemCommand`. `LogoutCommandValidator` never ran; `{"refreshToken": null}` would have reached `HashRefreshToken` as a 500.
+**Fix**: Constraint changed to `where TRequest : notnull`. `ValidationBehaviorTests` sends an invalid `LogoutCommand` through a real service provider — it failed before the fix and passes after.
+**Why**: Microsoft's container treats an open generic whose constraint does not match as "not registered", without an error. Handler tests call the handler directly and cannot see the pipeline, so a wiring rule needs a test that goes through the container.
+
+### D11. A test package pulled a dependency with known vulnerabilities (M10)
+**Problem**: Adding `Testcontainers.PostgreSql` 4.7.0 made `dotnet restore` print `NU1903` twice: its transitive `SSH.NET` 2024.2.0 carries two high-severity advisories. Nothing failed — restore and build both succeeded with warnings.
+**Fix**: Took the latest stable, 4.15.0, which resolves `SSH.NET` 2026.0.0; restore is clean. `dotnet list package --include-transitive` confirmed the graph.
+**Why**: A package's advisories are not only its own. A version pinned from memory is a version chosen without looking at what it drags in, and restore warnings are easy to scroll past — read them, and check the transitive graph rather than the direct reference.
 
 ---
 
@@ -235,6 +328,11 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: `docker compose down -v` first, then `migrations remove` once per migration, then confirmed `Migrations/` was completely empty before `migrations add InitialCreate`. Read the generated file and counted the `CreateTable` calls, with zero `AlterColumn`, before applying anything. Done twice — once for the schema fixes, once after the A15 restructure.
 **Why**: EF diffs against the snapshot, not against the database. Deleting migration files without deleting the snapshot changes what is recorded, not what EF believes already exists.
 
+### E6. A generated migration was scaffolded with an empty `Up` (M8.1)
+**Problem**: `dotnet ef migrations add RemoveTokenCounterFromUsers` wrote its three files and updated the snapshot, but the `Up` body was empty — no `DropColumn` for `TokensUsedThisMonth` or `LastTokenResetDate`, although both properties had already been removed from `User`. Applying it as generated would have recorded the migration as done while changing nothing, leaving the database two columns ahead of the model.
+**Fix**: The project owner wrote the two `DropColumn` calls by hand, applied the migration, and confirmed in `psql` that neither column remains on `Users` and that `__EFMigrationsHistory` lists it.
+**Why**: EF scaffolds operations by diffing `StudyHubDbContextModelSnapshot.cs` against the current model — never the database against the model (E5). When the snapshot is already level with the model, that diff is empty and so is the migration, while the command still succeeds and still writes a plausible-looking file. A migration must be read before it is applied; an exit code says a file was written, not that the file does anything.
+
 ---
 
 ## F. Runtime & Environment
@@ -253,6 +351,30 @@ BC.HashPassword(password, WorkFactor);
 **Problem**: An `INSERT` written to test `CK_Task_Status` returned `syntax error at or near "INTO"`, with a fragment of the *previous* query still visible in the error text. The statement never parsed, so the constraint was never exercised.
 **Fix**: Re-sent the same `INSERT` on a single line; it was then correctly rejected by `CK_Task_Status`.
 **Why**: At a glance the result looked like proof — a red error naming the right table and no row inserted, which is exactly what a working constraint produces. Read *which* error came back, not merely that one did.
+
+### F4. A stale `@userId` in the `.http` file surfaced as a 500, not a 404 (M5.1)
+**Problem**: Every `POST /api/tasks` returned 500 while verifying an unrelated date defect. The log showed `PostgresException 23503` — `FK_Items_Users_UserId`. The `@userId` variable still held an id from a database that had since been recreated, so `Guid.TryParse` passed, no handler asks whether the current user exists, and the failure surfaced only at save time.
+**Fix**: Registered a fresh user and updated the variable. No code changed. Translating `23503` in `UnitOfWork` is scheduled in M6 step 6.4, alongside the concurrency-exception translation that touches the same method.
+**Why**: Two causes met. A manual test file carries data-dependent state that expires silently when the database is reset — nothing in it fails loudly, the ids simply stop matching. And `UnitOfWork` translates only `23505`, so every other PostgreSQL error state arrives as a 500 that names nothing; the `SqlState` in the log is the first thing to read before suspecting the feature you just touched.
+
+### F5. Four healthy source files were reported as binary by the repository export tool (M5.1)
+**Not a bug.** All four are valid UTF-8 with a BOM — first bytes `EF BB BF`, no NUL bytes anywhere — verified by reading the bytes rather than trusting the label. `[Binary file]` came from the export tool's own detection, and it spread: two files carried the label from the start, and two more acquired it immediately after being edited, while their bytes stayed correct throughout. A re-save "fix" was performed on the first two and changed nothing, because nothing was wrong. A high proportion of Arabic comments was ruled out as the trigger — `ForbiddenException.cs` is 49% non-ASCII bytes and exports fine. The real cost was a diagnosis built on a tool's verdict instead of on the file, and two documents briefly recording a defect that never existed.
+
+### F6. A key-generation command failed because the shell was an older PowerShell (M6)
+**Problem**: `[System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48)` returned `MethodNotFound` under Windows PowerShell 5.1. The next command, `dotnet user-secrets set "Jwt:Key" $key`, then reported `Missing parameter value for 'value'` — an unrelated-looking message caused entirely by the first failure leaving `$key` unassigned.
+**Fix**: Replaced the one-liner with a version-independent form — allocate a `byte[]`, fill it through `RandomNumberGenerator.Create().GetBytes($bytes)`, then Base64-encode it — and confirmed the result with `dotnet user-secrets list` instead of trusting the set command's exit.
+**Why**: Windows PowerShell 5.1 runs on .NET Framework, which exposes only the instance method; the static overload arrived with .NET 6. A .NET API is reachable from a shell only through the runtime that shell was built on, so the class name resolving proves nothing about the method. And a failed assignment does not stop the script — it hands an empty value to the next command, which then fails for a reason that hides the real one.
+
+### F7. The build failed because an API instance from an earlier session was still running (M7)
+**Problem**: The first `dotnet build` of M7 failed with `MSB3021: Unable to copy file ... StudyHub.Infrastructure.dll ... being used by another process`, while `dotnet test` in the same run passed with 105 tests. The process holding the file was a `StudyHub.API` started the day before and never stopped; it also held port 5158.
+**Fix**: Found the owner with `Get-NetTCPConnection -LocalPort 5158` and `Get-Process`, stopped it, rebuilt clean. The M7 manual run then started its own instance and stopped it afterwards.
+**Why**: On Windows a running process locks its own DLLs, so only the project whose output it runs fails to build; the test projects build into other folders and stay green. A green `dotnet test` next to a red build is therefore a sign of a locked file, not of broken code. A server started for a manual check belongs to that check and should be stopped when it ends.
+**Repeat (M8.1)**: The same lock, a day later: a `StudyHub.API` started on 18 September (the owner's first real Gemini call) still held port 5158, so the M8.1 baseline build failed with `MSB3027`/`MSB3021` while all 185 tests passed. Identified with `Get-NetTCPConnection -LocalPort 5158` and `Win32_Process` (its creation date and its path under `StudyHub.API/bin`), stopped, rebuilt clean. Checking the port before the first build is now Step 0 of every plan for this reason.
+
+### F8. Two alarming lines in the container log that are not faults (M10)
+**Problem**: The first container run logged `Cannot load library libgssapi_krb5.so.2` with `Error: ... cannot open shared object file`, and `Failed to determine the https port for redirect`. Both look like failures; neither is. The API registered, logged in and served the dashboard over port 8080 throughout.
+**Fix**: Nothing to fix. The first is Npgsql probing for Kerberos support the ASP.NET runtime image does not ship, which it does not need for password authentication; the second is `UseHttpsRedirection` finding no HTTPS port, expected where TLS is terminated elsewhere. Both are recorded in the README's common-problems table so the next reader does not chase them.
+**Why**: A container log is the first place a deployment is judged, and a message written at error level by a library is not the same as a failed request. Judge it by what the caller got: three successful calls say more than two frightening lines.
 
 ---
 
@@ -274,6 +396,28 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: Applied the change for real, wiped the database (old-format hashes are not verifiable by `EnhancedVerify`), corrected D4 and D5, and moved the two behavioural proofs into the M6 checklist.
 **Why**: Every verification in use here is behavioural — a status code, a row, a green test. A change with no externally observable behaviour passes all of them unchanged. Such a change must be verified by opening the file and reading it; there is nothing else.
 
+### G5. A destructive proof poisoned the account the next session depended on (M6)
+**Problem**: Session B proved two refusal paths by corrupting a row directly on `login@test.com`: `IsActive = false`, then `PasswordHash = 'corrupt'`. The first was reverted, the second was not — `SELECT` showed `IsActive = t` beside a hash of `corrupt`. Session C reused the account, so its first request returned 401, and the two chained requests after it failed with `Unable to evaluate expression`, an error that points at the `.http` file rather than at the data.
+**Fix**: Gave session C its own account, `rotate@test.com`, and left the damaged one damaged. The revert steps stay in the session B script but are no longer load-bearing.
+**Why**: A proof that mutates shared state is a test without teardown. Reverting one of two mutations is the common case, not forgetting both: the first revert makes the cleanup feel finished. Two cheaper habits: one throwaway account per proof session, and reading the *first* red result rather than the noisiest one — the chained-request errors here were consequences, and chasing them would have cost an hour on a file that was correct.
+
+**Repeat (M9)**: `ADM3` deactivated the shared `other@test.com`, which `A5`, `M7-18`, `M8-8` and `M8-9` log in as, so one run of the admin section broke all four. The admin requests now consume their own account, `adm-target@test.com`, and `other@test.com` was checked in `psql` and found still active, so no reactivation was needed.
+
+### G6. An interceptor registered in DI was never called (M10)
+**Problem**: The statement counter read **0** after a request that had obviously queried the database. It was registered as `services.AddSingleton<IInterceptor>(counter)` in the test host, which is the documented way — for singleton interceptors. A `DbCommandInterceptor` is not one, so EF never resolved it, and every "this endpoint costs N statements" assertion would have passed against a counter that counts nothing.
+**Fix**: Attached it to the context's own options instead: `services.ConfigureDbContext<StudyHubDbContext>(o => o.AddInterceptors(counter))`.
+**Why**: The bug was caught only because the suite's first test asserts a number known independently — `/api/auth/me` costs exactly one statement (M8.1). **Calibrate an instrument against a known value before trusting what it measures**, or a broken measurement becomes a passing test suite.
+
+### G7. A date formatted with the machine's culture became a Hijri year (M10)
+**Problem**: A dashboard test failed because a task due one minute *after* the urgent window appeared in the urgent list. The due dates it sent were `1448-04-13T20:59:00Z`: `ToString("yyyy-MM-ddTHH:mm:ss")` uses the current culture, which on this machine is Umm al-Qura, so the year came out Hijri. The API accepted them without complaint — a date in the year 1448 is a valid past date, which also made both tasks overdue and therefore urgent.
+**Fix**: `ToString(format, CultureInfo.InvariantCulture)` in the test helper. A grep confirmed the application code formats no date this way; its timestamps go out through `System.Text.Json`, which is culture-independent.
+**Why**: A format string does not pin the calendar — the culture does. Anything that crosses a boundary (JSON, SQL, a URL, a file name) is formatted with `InvariantCulture`, and a test whose *input* is wrong fails in a way that looks like a bug in the code under test.
+
+### G8. A concurrency test's own chain died between rounds (M10)
+**Problem**: `Refresh_TwoParallelRequestsWithOneToken_ShouldNeverBothSucceed` passed, then failed a later run with "0 winners" in a middle round. The cause was the system working as designed: when the losing request arrives *after* the rotation, it is read as reuse, and reuse detection revokes **every** session the user has (§9.3) — including the token the round had just won, which the next round then presented.
+**Fix**: The test logs in again after any round whose loser got 401, and carries on with a fresh chain.
+**Why**: A test that drives a system through its own defence mechanisms has to account for what those defences do to its fixtures. A flaky result was the first clue, and the honest explanation was in the requirements, not in the test framework.
+
 ---
 
 ## H. Leftover Scaffolding
@@ -282,6 +426,16 @@ BC.HashPassword(password, WorkFactor);
 **Items**: the `/weatherforecast` template endpoint, the `/db-check` connectivity probe, the `/ping` MediatR test (`PingQuery.cs`), and duplicate `using System;` blocks despite `ImplicitUsings` being enabled.
 **Fix**: Deleted each once it had proven what it was written to prove.
 **Why**: Temporary verification code is legitimate and useful — but it must be removed the moment it's served its purpose, or it becomes indistinguishable from real functionality.
+
+### H2. A superseded EF Core configuration was left in place beside its replacement (M5.1)
+**Problem**: Found during code review — no runtime error, no failing test. `UserConfiguration.cs` configured `User.Email` twice: the original block converting through `Email.Create`, and the block added in step 5.1.4 converting through `Email.FromPersisted`. Both compiled; the behaviour was correct only because EF Core lets the last call win.
+**Fix**: Deleted the superseded block and kept `FromPersisted`, leaving one `Property(u => u.Email)` call in the file.
+**Why**: A configuration API that overwrites silently turns leftover code into a correctness question decided by line order. Nothing in the suite guards it either — `EmailTests` exercises the value object directly and never travels through the converter, so reading the file was the only available proof (verification rule 3).
+
+### H3. A one-time claims check was copied into every controller (M6)
+**Problem**: Found during code review. `GET debug-claims`, written once to read the real claim names (Requirements §9.1), existed in all five controllers after the claim name was settled — five routes that returned a caller's token contents back to them.
+**Fix**: Removed from `AuthController`, `CoursesController`, `ItemsController`, `NotesController`, and `TasksController`, with their now-unused `using` lines.
+**Why**: A diagnostic that answered its question is dead code. Scaffolding copied instead of placed once multiplies the cleanup — and each copy is one more surface nobody remembers is there.
 
 ---
 
@@ -295,3 +449,5 @@ BC.HashPassword(password, WorkFactor);
 6. **A command that failed is not proof that what you were testing failed** (F3). Test a rule by trying to break it *and* by sending something that should pass — one result without the other is half an answer.
 7. **When every available design costs something real, question the requirement** (A15). The price is usually being paid for a contradiction in what was asked, not for the mechanism being built.
 8. **The dependency rule is a constraint, not a document** (B8). Application has no reference to EF Core, so a repository implementation placed there cannot compile — the architecture caught the mistake instead of merely discouraging it.
+
+

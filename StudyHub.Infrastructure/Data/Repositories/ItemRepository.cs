@@ -4,13 +4,17 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Infrastructure.Data.Repositories;
 
+/// <summary>
+/// EF Core implementation of <see cref="StudyHub.Application.Common.Interfaces.IItemRepository"/>.
+/// </summary>
 public class ItemRepository : IItemRepository
 {
     private readonly StudyHubDbContext _context;
 
     public ItemRepository(StudyHubDbContext context) => _context = context;
 
-    // Items لا Notes: الأب قد يكون ملاحظة أو مهمة، ولا نعرف أيهما قبل الجلب
+    // Items, not Notes: a parent may be a note or a task, and which one is not known before
+    // it is loaded
     public Task<Item?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         => _context.Items.FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
@@ -25,8 +29,9 @@ public class ItemRepository : IItemRepository
         var subtree = new List<Item> { root };
         var currentLevel = new List<Guid> { root.Id };
 
-        // حدّ صارم على الدورات: العمق مقيَّد بـ Item.MaxDepth، والسقف هنا
-        // يمنع حلقة لا نهائية لو صنع UPDATE مباشر في القاعدة دائرة
+        // A hard bound on the iterations: the depth is capped by Item.MaxDepth, and this
+        // ceiling keeps the loop finite even if a direct UPDATE in the database ever created
+        // a cycle
         for (var level = 0; level <= Item.MaxDepth && currentLevel.Count > 0; level++)
         {
             var children = await _context.Items

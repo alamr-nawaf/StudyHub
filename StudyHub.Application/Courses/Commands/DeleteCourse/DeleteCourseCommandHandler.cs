@@ -4,6 +4,10 @@ using StudyHub.Application.Common.Interfaces;
 
 namespace StudyHub.Application.Courses.Commands.DeleteCourse;
 
+/// <summary>
+/// Soft-deletes one of the current user's courses together with its whole item tree, in one
+/// save: either all of it goes or none of it does (ADR-06).
+/// </summary>
 public class DeleteCourseCommandHandler : IRequestHandler<DeleteCourseCommand>
 {
     private readonly ICourseRepository _courseRepository;
@@ -31,7 +35,8 @@ public class DeleteCourseCommandHandler : IRequestHandler<DeleteCourseCommand>
         if (course.UserId != _currentUser.UserId)
             throw new ForbiddenException("You do not own this course.");
 
-        // لا حاجة للمرور على المستويات: وراثة CourseId تجلبها كلها دفعة واحدة
+        // No walk down the levels is needed: the inherited CourseId brings every item of the
+        // course back at once, whatever its depth (ADR-09)
         var items = await _itemRepository.GetByCourseAsync(course.Id, cancellationToken);
 
         foreach (var item in items)

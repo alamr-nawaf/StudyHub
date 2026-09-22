@@ -1,6 +1,9 @@
 ﻿namespace StudyHub.Domain.Common;
 
-// للكيانات التي تتغيّر بعد إنشائها فقط
+/// <summary>
+/// The base for entities that change after they are created; everything else keeps only
+/// the CreatedAt of <see cref="BaseEntity"/>.
+/// </summary>
 public abstract class AuditableEntity : BaseEntity
 {
     public DateTime? UpdatedAt { get; protected set; }

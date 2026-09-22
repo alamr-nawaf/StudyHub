@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StudyHub</title>
+<!--
+  StudyHub demo page (Requirements ADR-48). Served by the API itself from wwwroot, so it
+  shares the API's origin and needs no CORS policy. Plain HTML and JavaScript: no build
+  step, no package, no third-party script. Every value from the server is written as text,
+  never as HTML, because the refresh token sits in sessionStorage where any script on this
+  page could read it.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #EEF2EC;
+    --sheet: #FBFCF9;
+    --ink: #1E3A33;
+    --muted: #5B6D66;
+    --line: #CDD6CC;
+    --marker: #F3D94A;
+    --late: #B3261E;
+    --late-soft: #F2B5AC;
+    --done: #2F6F4E;
+    --focus: #2B6CB0;
+    --font: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--paper); color: var(--ink); font: 400 16px/1.7 var(--font); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  /* Header */
+  .top {
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+    padding: 12px 28px; border-bottom: 1px solid var(--line); background: var(--sheet);
+  }
+  .brand { font-weight: 600; font-size: 1.35rem; direction: ltr; }
+  .tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+  .tab {
+    border: 0; background: none; padding: 6px 14px; cursor: pointer; color: var(--muted);
+    border-bottom: 2px solid transparent;
+  }
+  .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
+  .who { margin-inline-start: auto; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .quota { font-size: .82rem; color: var(--muted); min-width: 190px; }
+  .quota-bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+  .quota-bar span { display: block; height: 100%; background: var(--ink); }
+
+  .account { background: var(--sheet); border-bottom: 1px solid var(--line); padding: 14px 28px; }
+  .account dl { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 0; }
+  .account dt { font-size: .8rem; color: var(--muted); }
+  .account dd { margin: 0; }
+  .account .id { direction: ltr; font-size: .9rem; }
+
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 28px 96px; }
+
+  h2 { font-size: 1.15rem; font-weight: 600; margin: 0 0 12px; }
+  h3 { font-size: 1rem; font-weight: 600; margin: 0 0 8px; }
+  p { margin: 0 0 8px; }
+  .muted { color: var(--muted); }
+  .sheet { background: var(--sheet); border: 1px solid var(--line); border-radius: 6px; padding: 20px 22px; }
+  .stack-gap > * + * { margin-top: 24px; }
+
+  /* Buttons */
+  .btn {
+    border: 1px solid var(--ink); background: var(--ink); color: var(--sheet);
+    padding: 6px 16px; border-radius: 4px; cursor: pointer;
+  }
+  .btn.quiet { background: transparent; color: var(--ink); }
+  .btn.danger { background: var(--late); border-color: var(--late); }
+  .btn:disabled, .link:disabled, select:disabled { opacity: .5; cursor: wait; }
+  .link {
+    border: 0; background: none; padding: 0; cursor: pointer; color: var(--ink);
+    text-decoration: underline; text-underline-offset: 3px; font-size: .9rem;
+  }
+  .link.danger { color: var(--late); }
+  .actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+
+  /* Forms */
+  form.stack { display: grid; gap: 10px; }
+  label { display: grid; gap: 3px; font-size: .9rem; color: var(--muted); }
+  input, select, textarea {
+    border: 1px solid var(--line); border-radius: 4px; padding: 7px 10px; background: #fff;
+    color: var(--ink); width: 100%;
+  }
+  textarea { min-height: 84px; resize: vertical; line-height: 1.6; }
+  input[type="email"], input[type="password"], input[type="datetime-local"], .ltr { direction: ltr; text-align: right; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .panel { margin: 10px 0; padding: 14px 16px; background: var(--paper); border-radius: 4px; }
+
+  /* Segmented choice (note or task, and the task filter) */
+  .segmented { display: inline-flex; border: 1px solid var(--ink); border-radius: 4px; overflow: hidden; }
+  .segmented button { border: 0; background: transparent; padding: 5px 16px; cursor: pointer; }
+  .segmented button + button { border-inline-start: 1px solid var(--ink); }
+  .segmented button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+
+  /* Auth */
+  .auth { max-width: 420px; margin: 48px auto; }
+  .auth .tabs { margin-bottom: 18px; }
+  .hint { font-size: .82rem; color: var(--muted); }
+
+  /* Home */
+  .counts {
+    display: flex; flex-wrap: wrap; margin: 0 0 28px; padding: 0;
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .counts div { padding: 12px 20px; border-inline-end: 1px solid var(--line); }
+  .counts div:last-child { border-inline-end: 0; }
+  .counts dt { font-size: .82rem; color: var(--muted); }
+  .counts dd { margin: 0; font-size: 1.5rem; font-weight: 600; }
+  .counts .late dd { color: var(--late); }
+  .home { display: grid; grid-template-columns: 3fr 2fr; gap: 28px; align-items: start; }
+  .welcome { max-width: 560px; }
+
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list > li { padding: 12px 0; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
+  .list > li:last-child { border-bottom: 0; }
+
+  /* The one bold element: urgent titles are highlighted the way a student marks a page */
+  .marker {
+    font-weight: 500; padding: 0 3px;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+    background-image: linear-gradient(transparent 48%, var(--marker) 48%, var(--marker) 94%, transparent 94%);
+    background-repeat: no-repeat; background-position: right bottom; background-size: 100% 100%;
+    animation: sweep .7s ease-out both;
+  }
+  .marker.overdue { background-image: linear-gradient(transparent 48%, var(--late-soft) 48%, var(--late-soft) 94%, transparent 94%); }
+  @keyframes sweep { from { background-size: 0% 100%; } to { background-size: 100% 100%; } }
+  @media (prefers-reduced-motion: reduce) { .marker { animation: none; } }
+
+  .meta { font-size: .85rem; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .late-tag { color: var(--late); font-weight: 500; }
+  .recent button {
+    width: 100%; text-align: right; border: 0; background: none; padding: 0; cursor: pointer; display: grid; gap: 2px;
+  }
+  .recent button:hover .name { text-decoration: underline; }
+
+  /* Courses */
+  .content { display: grid; grid-template-columns: 270px 1fr; gap: 24px; align-items: start; }
+  .courses { list-style: none; margin: 12px 0 0; padding: 0; }
+  .courses button {
+    width: 100%; text-align: right; border: 0; background: none; padding: 8px 10px; cursor: pointer;
+    border-inline-start: 3px solid transparent;
+  }
+  .courses button[aria-current="true"] { border-inline-start-color: var(--ink); background: var(--paper); font-weight: 500; }
+  .courses .standalone { color: var(--muted); border-top: 1px solid var(--line); margin-top: 6px; padding-top: 12px; }
+  .pane-head { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; justify-content: space-between; }
+  .pane-head h2 { margin: 0; }
+  .adders { display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
+
+  /* The tree: the inline border is the hierarchy, not decoration */
+  .tree { list-style: none; margin: 0; padding: 0; }
+  .tree .tree { padding-inline-start: 18px; margin-inline-start: 6px; border-inline-start: 1px solid var(--line); }
+  .node { padding: 10px 0; }
+  .node-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .kind { font-size: .75rem; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+  .kind.task { border-color: var(--ink); color: var(--ink); }
+  .title { font-weight: 500; }
+  .title.completed { text-decoration: line-through; color: var(--muted); }
+  .body { white-space: pre-wrap; margin: 4px 0 6px; }
+  .node .actions { margin-top: 6px; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 4px; font-size: .88rem; }
+  .controls label { display: flex; gap: 6px; align-items: center; font-size: .85rem; }
+  .controls select { width: auto; padding: 2px 8px; font-size: .88rem; }
+
+  .ai { margin: 10px 0; padding: 12px 14px; border-inline-start: 3px solid var(--marker); background: #FFFDF2; }
+  .ai .list > li { padding: 8px 0; }
+
+  /* Tasks tab */
+  .task-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; }
+  .task-row .course { font-size: .85rem; }
+
+  .empty { color: var(--muted); padding: 14px 0; }
+
+  /* Toast: visible wherever the user is on the page */
+  .toast {
+    position: fixed; inset-inline: 0; bottom: 20px; margin: 0 auto; width: fit-content; max-width: min(640px, 92vw);
+    padding: 10px 18px; border-radius: 6px; background: var(--ink); color: var(--sheet);
+    display: flex; gap: 14px; align-items: center; box-shadow: 0 4px 18px rgba(30, 58, 51, .25);
+  }
+  .toast.error { background: var(--late); }
+  .toast small { display: block; opacity: .85; direction: ltr; text-align: right; }
+  .toast button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 1.1rem; line-height: 1; }
+
+  @media (max-width: 860px) {
+    .home, .content { grid-template-columns: 1fr; }
+    .top, .account { padding: 12px 16px; }
+    main { padding: 16px 16px 96px; }
+    .row { grid-template-columns: 1fr; }
+    .task-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="brand">StudyHub</span>
+  <nav class="tabs" id="tabs" hidden>
+    <button class="tab" data-view="home">الرئيسية</button>
+    <button class="tab" data-view="courses">الكورسات</button>
+    <button class="tab" data-view="tasks">المهام</button>
+    <button class="tab" data-view="admin" id="adminTab" hidden>الإدارة</button>
+  </nav>
+  <div class="who" id="who" hidden>
+    <div class="quota" id="quota"></div>
+    <button class="link" id="accountBtn" aria-expanded="false" aria-controls="account">حسابي</button>
+    <button class="link" id="logoutBtn">خروج</button>
+  </div>
+</header>
+<section class="account" id="account" hidden></section>
+
+<main id="view"></main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Constants that mirror the API (Requirements §8, §14.1, ADR-40)
+// ---------------------------------------------------------------------------
+const NOTE = 0, TASK = 1;
+const COMPLETED = 2;
+const ADMIN_ROLE = 1;
+const MAX_DEPTH = 4;                 // Item.MaxDepth: an item at depth 4 takes no children
+const PAGE_SIZE = 100;               // Paging.MaxPageSize
+const TITLE_MAX = 250;
+const STATUS_NAMES = ["لم تبدأ", "جارية", "منجزة"];
+const PRIORITY_NAMES = ["منخفضة", "متوسطة", "عالية"];
+const REFRESH_KEY = "studyhub.refresh";
+
+// Gregorian calendar and Latin digits on purpose: ar-SA alone defaults to the Umm al-Qura
+// calendar (troubleshooting G7). Times are shown in Riyadh, the business zone (ADR-40)
+const dateFormat = new Intl.DateTimeFormat("ar-SA-u-ca-gregory-nu-latn", {
+  timeZone: "Asia/Riyadh", dateStyle: "medium", timeStyle: "short"
+});
+const numberFormat = new Intl.NumberFormat("ar-SA-u-nu-latn");
+
+const state = {
+  access: null,
+  refresh: sessionStorage.getItem(REFRESH_KEY),
+  me: null,
+  courses: [],
+  view: "home",
+  open: null,          // { type: "course", id } or { type: "standalone" }
+  form: null,          // the one open form: "course-new", "course-edit", "add:<parentId|root>", "edit:<id>", "due:<id>"
+  addKind: "note",     // what the open "add" form creates
+  ai: {},              // noteId -> { summary, suggestions, tokens }
+  taskFilter: "open"   // "open" | "done" | "all"
+};
+
+// ---------------------------------------------------------------------------
+// DOM helper: every server value becomes a text node, never HTML
+// ---------------------------------------------------------------------------
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === "class") el.className = value;
+    else if (key.startsWith("on")) el.addEventListener(key.slice(2), value);
+    else if (key === "value") el.value = value;
+    else el.setAttribute(key, value === true ? "" : value);
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+const $ = (id) => document.getElementById(id);
+const formatDate = (iso) => (iso ? dateFormat.format(new Date(iso)) : "");
+const isLate = (task) => task.status !== COMPLETED && task.dueDate && Date.parse(task.dueDate) < Date.now();
+const courseTitle = (id) => state.courses.find((c) => c.id === id)?.title;
+
+// datetime-local has no zone: the value is read as Riyadh time (no daylight saving, so
+// +03:00 is exact) and sent as UTC ending in Z, the only form the API accepts (ADR-18)
+function riyadhInputToUtc(value) {
+  return value ? new Date(value + ":00+03:00").toISOString() : null;
+}
+function utcToRiyadhInput(iso) {
+  return iso ? new Date(Date.parse(iso) + 3 * 3600e3).toISOString().slice(0, 16) : "";
+}
+
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+let toastTimer = null;
+function toast(message, { error = false, details = "" } = {}) {
+  clearTimeout(toastTimer);
+  const el = $("toast");
+  el.className = error ? "toast error" : "toast";
+  el.replaceChildren(
+    h("div", null, message, details ? h("small", null, details) : null),
+    h("button", { "aria-label": "إغلاق", onclick: () => { el.hidden = true; } }, "×"));
+  el.hidden = false;
+  // Errors stay until closed or replaced: a message that vanishes before it is read is noise
+  if (!error) toastTimer = setTimeout(() => { el.hidden = true; }, 4000);
+}
+
+// ---------------------------------------------------------------------------
+// API client
+// ---------------------------------------------------------------------------
+class ApiError extends Error {
+  constructor(response, body) {
+    super(body?.detail || response.statusText);
+    this.status = response.status;
+    this.headline = ApiError.headlineFor(response, body);
+    const fieldErrors = body?.errors ? Object.values(body.errors).flat().join(" ") : "";
+    this.details = fieldErrors || body?.detail || "";
+  }
+
+  static headlineFor(response, body) {
+    switch (response.status) {
+      case 400: return "البيانات غير صحيحة.";
+      case 401: return "البريد أو كلمة المرور غير صحيحة.";
+      case 403: return "ليست لديك صلاحية لهذا.";
+      case 404: return "غير موجود، ربما حُذف.";
+      case 409: return "تعارض مع تغيير آخر، أو القيمة مستعملة.";
+      case 429: {
+        // Two different 429s (§8): the monthly quota, and the rate limiter
+        if (body?.title === "Quota exceeded") return "انتهت حصتك الشهرية من التوكنات.";
+        const after = response.headers.get("Retry-After");
+        return after ? `طلبات كثيرة في وقت قصير. حاول بعد ${after} ثانية.` : "طلبات كثيرة في وقت قصير. حاول بعد قليل.";
+      }
+      case 502: return "مزوّد الذكاء الاصطناعي لم يستجب. حاول مرة أخرى.";
+      default: return "حدث خطأ في الخادم.";
+    }
+  }
+}
+
+class SessionLost extends Error {}
+
+function setTokens(tokens) {
+  state.access = tokens.accessToken;
+  state.refresh = tokens.refreshToken;
+  sessionStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+}
+
+function clearSession() {
+  state.access = null;
+  state.refresh = null;
+  state.me = null;
+  sessionStorage.removeItem(REFRESH_KEY);
+}
+
+// One refresh at a time. Two parallel refreshes with the same token would look like a
+// stolen token being reused, and reuse detection revokes every session (§9.3)
+let refreshing = null;
+function refreshSession() {
+  if (!state.refresh) return Promise.reject(new SessionLost());
+  if (!refreshing) {
+    refreshing = (async () => {
+      const response = await fetch("/api/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: state.refresh })
+      });
+      if (!response.ok) {
+        clearSession();
+        throw new SessionLost();
+      }
+      setTokens(await response.json());
+    })().finally(() => { refreshing = null; });
+  }
+  return refreshing;
+}
+
+async function readBody(response) {
+  const text = await response.text();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+async function api(path, { method = "GET", body, auth = true, retried = false } = {}) {
+  const headers = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (auth) {
+    if (!state.access) await refreshSession();
+    headers.Authorization = "Bearer " + state.access;
+  }
+
+  const response = await fetch(path, {
+    method, headers, body: body === undefined ? undefined : JSON.stringify(body)
+  });
+
+  // An expired access token (15 minutes) is renewed once, then the request is repeated
+  if (response.status === 401 && auth && !retried) {
+    await refreshSession();
+    return api(path, { method, body, auth, retried: true });
+  }
+
+  const data = await readBody(response);
+  if (!response.ok) throw new ApiError(response, data);
+  return data;
+}
+
+// Runs an action, reports failures, and returns to the login form when the session is gone
+async function run(action, control) {
+  if (control) control.disabled = true;
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof SessionLost) renderAuth("انتهت الجلسة. سجّل الدخول مرة أخرى.");
+    else if (error instanceof ApiError) toast(error.headline, { error: true, details: error.details });
+    else {
+      toast("تعذّر الاتصال بالخادم. تأكد أن الـ API يعمل ثم أعد المحاولة.", { error: true });
+      console.error(error);
+    }
+  } finally {
+    if (control) control.disabled = false;
+  }
+}
+
+const rerender = () => run(render);
+
+// ---------------------------------------------------------------------------
+// Session, header and account
+// ---------------------------------------------------------------------------
+async function loadMe() {
+  state.me = await api("/api/auth/me");
+  const used = state.me.tokensUsedThisMonth;
+  const quota = state.me.monthlyTokenQuota;
+  const percent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0;
+
+  $("quota").replaceChildren(
+    `توكنات هذا الشهر: ${numberFormat.format(used)} من ${numberFormat.format(quota)}`,
+    h("div", { class: "quota-bar", role: "presentation" }, h("span", { style: `width:${percent}%` })));
+  $("accountBtn").textContent = state.me.fullName;
+  $("adminTab").hidden = state.me.role !== ADMIN_ROLE;
+  renderAccount();
+}
+
+function renderAccount() {
+  const me = state.me;
+  const copy = h("button", { class: "link", onclick: async () => {
+    try {
+      await navigator.clipboard.writeText(me.id);
+      toast("نُسخ رقم الحساب.");
+    } catch {
+      toast("انسخ الرقم يدويًا من الخانة.", { error: true });
+    }
+  } }, "انسخ");
+
+  $("account").replaceChildren(h("dl", null,
+    h("div", null, h("dt", null, "الاسم"), h("dd", null, me.fullName)),
+    h("div", null, h("dt", null, "البريد"), h("dd", { class: "ltr" }, me.email)),
+    h("div", null, h("dt", null, "الدور"), h("dd", null, me.role === ADMIN_ROLE ? "مسؤول" : "مستخدم")),
+    h("div", null, h("dt", null, "رقم الحساب (يحتاجه المسؤول للتعطيل)"),
+      h("dd", { class: "actions" }, h("span", { class: "id" }, me.id), copy))));
+}
+
+$("accountBtn").addEventListener("click", () => {
+  const panel = $("account");
+  panel.hidden = !panel.hidden;
+  $("accountBtn").setAttribute("aria-expanded", String(!panel.hidden));
+});
+
+async function loadCourses() {
+  const page = await api(`/api/courses?page=1&pageSize=${PAGE_SIZE}`);
+  state.courses = page.items;
+}
+
+async function enterApp() {
+  await loadMe();
+  await loadCourses();
+  $("tabs").hidden = false;
+  $("who").hidden = false;
+  state.view = "home";
+  await render();
+}
+
+$("logoutBtn").addEventListener("click", () => run(async () => {
+  try {
+    await api("/api/auth/logout", { method: "POST", body: { refreshToken: state.refresh } });
+  } finally {
+    renderAuth("خرجت من الحساب.");
+  }
+}));
+
+$("tabs").addEventListener("click", (event) => {
+  const tab = event.target.closest(".tab");
+  if (!tab) return;
+  state.view = tab.dataset.view;
+  state.form = null;
+  rerender();
+});
+
+// ---------------------------------------------------------------------------
+// Login and registration
+// ---------------------------------------------------------------------------
+function renderAuth(message) {
+  clearSession();
+  state.ai = {};
+  $("tabs").hidden = true;
+  $("who").hidden = true;
+  $("account").hidden = true;
+  if (message) toast(message);
+
+  let mode = "login";
+  const box = h("section", { class: "auth sheet" });
+
+  const draw = () => {
+    const isLogin = mode === "login";
+    const fields = isLogin
+      ? [
+          h("label", null, "البريد الإلكتروني", h("input", { name: "email", type: "email", required: true, autocomplete: "email" })),
+          h("label", null, "كلمة المرور", h("input", { name: "password", type: "password", required: true, autocomplete: "current-password" }))
+        ]
+      : [
+          h("label", null, "الاسم الكامل", h("input", { name: "fullName", required: true, autocomplete: "name" })),
+          h("label", null, "البريد الإلكتروني", h("input", { name: "email", type: "email", required: true, autocomplete: "email" })),
+          h("label", null, "كلمة المرور", h("input", { name: "password", type: "password", required: true, autocomplete: "new-password" })),
+          h("p", { class: "hint" }, "ثمانية أحرف على الأقل، فيها حرف إنجليزي كبير ورقم."),
+          h("label", null, "تأكيد كلمة المرور", h("input", { name: "confirmPassword", type: "password", required: true, autocomplete: "new-password" }))
+        ];
+
+    const submit = h("button", { class: "btn", type: "submit" }, isLogin ? "ادخل" : "أنشئ الحساب");
+    const form = h("form", { class: "stack", onsubmit: (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(form));
+      run(async () => {
+        if (!isLogin) await api("/api/auth/register", { method: "POST", body: data, auth: false });
+        const tokens = await api("/api/auth/login", {
+          method: "POST", body: { email: data.email, password: data.password }, auth: false
+        });
+        setTokens(tokens);
+        await enterApp();
+      }, submit);
+    } }, fields, submit);
+
+    box.replaceChildren(
+      h("div", { class: "tabs" },
+        h("button", { class: "tab", type: "button", "aria-selected": String(isLogin), onclick: () => { mode = "login"; draw(); } }, "تسجيل الدخول"),
+        h("button", { class: "tab", type: "button", "aria-selected": String(!isLogin), onclick: () => { mode = "register"; draw(); } }, "حساب جديد")),
+      form);
+    form.querySelector("input").focus();
+  };
+
+  $("view").replaceChildren(box);
+  draw();
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+async function render() {
+  for (const tab of document.querySelectorAll("#tabs .tab")) {
+    tab.setAttribute("aria-selected", String(tab.dataset.view === state.view));
+  }
+  if (state.view === "home") await renderHome();
+  else if (state.view === "courses") await renderCourses();
+  else if (state.view === "tasks") await renderTasks();
+  else await renderAdmin();
+}
+
+function go(view, open, form = null) {
+  state.view = view;
+  if (open !== undefined) state.open = open;
+  state.form = form;
+  rerender();
+}
+
+// ---- Shared task controls: status, priority and due date, each saved at once ----
+function taskControls(task) {
+  const status = h("select", { "aria-label": "الحالة", onchange: () => run(async () => {
+    await api(`/api/tasks/${task.id}/status`, { method: "PATCH", body: { status: Number(status.value) } });
+    toast("حُفظت الحالة.");
+    await render();
+  }, status) }, STATUS_NAMES.map((name, value) => h("option", { value, selected: value === task.status }, name)));
+
+  // The schedule is replaced as a whole, so a priority change resends the current due date
+  const priority = h("select", { "aria-label": "الأهمية", onchange: () => run(async () => {
+    await api(`/api/tasks/${task.id}/schedule`, {
+      method: "PATCH", body: { priority: Number(priority.value), dueDate: task.dueDate }
+    });
+    toast("حُفظت الأهمية.");
+    await render();
+  }, priority) }, PRIORITY_NAMES.map((name, value) => h("option", { value, selected: value === task.priority }, name)));
+
+  const late = isLate(task);
+  const due = task.dueDate
+    ? h("span", { class: late ? "late-tag" : null }, (late ? "متأخرة، كانت تستحق " : "تستحق ") + formatDate(task.dueDate))
+    : h("span", { class: "muted" }, "بلا موعد");
+
+  return h("div", null,
+    h("div", { class: "controls" },
+      h("label", null, "الحالة", status),
+      h("label", null, "الأهمية", priority),
+      due,
+      h("button", { class: "link", onclick: () => { state.form = "due:" + task.id; rerender(); } }, task.dueDate ? "غيّر الموعد" : "حدّد موعدًا")),
+    state.form === "due:" + task.id ? dueForm(task) : null);
+}
+
+function dueForm(task) {
+  const input = h("input", { type: "datetime-local", value: utcToRiyadhInput(task.dueDate), "aria-label": "الموعد بتوقيت الرياض" });
+  const save = (dueDate, button) => run(async () => {
+    await api(`/api/tasks/${task.id}/schedule`, { method: "PATCH", body: { priority: task.priority, dueDate } });
+    state.form = null;
+    toast(dueDate ? "حُفظ الموعد." : "أُزيل الموعد.");
+    await render();
+  }, button);
+
+  return h("div", { class: "panel" },
+    h("label", null, "الموعد (بتوقيت الرياض)", input),
+    h("div", { class: "actions", style: "margin-top:10px" },
+      h("button", { class: "btn", onclick: (e) => {
+        if (!input.value) { toast("اختر تاريخًا ووقتًا أولًا.", { error: true }); return; }
+        save(riyadhInputToUtc(input.value), e.currentTarget);
+      } }, "احفظ الموعد"),
+      task.dueDate ? h("button", { class: "link danger", onclick: (e) => save(null, e.currentTarget) }, "أزل الموعد") : null,
+      h("button", { class: "link", onclick: () => { state.form = null; rerender(); } }, "إلغاء")));
+}
+
+// ---- Home (UC-08, §15.4) --------------------------------------------------
+async function renderHome() {
+  const dashboard = await api("/api/dashboard");
+  const c = dashboard.counts;
+
+  if (c.courses === 0 && c.notes === 0 && c.tasks === 0) {
+    $("view").replaceChildren(h("section", { class: "sheet welcome" },
+      h("h2", null, "أهلًا " + state.me.fullName),
+      h("p", null, "ابدأ بإنشاء كورس لكل مادة تدرسها، ثم أضف فيه ملاحظاتك ومهامك. الملاحظة يمكن تلخيصها، واستخراج المهام منها بالذكاء الاصطناعي."),
+      h("p", { class: "muted" }, "وملاحظة أو مهمة لا تتبع أي مادة تضعها في «بدون كورس»."),
+      h("div", { class: "actions", style: "margin-top:14px" },
+        h("button", { class: "btn", onclick: () => go("courses", undefined, "course-new") }, "أنشئ أول كورس"))));
+    return;
+  }
+
+  const count = (label, value, cls) =>
+    h("div", { class: cls }, h("dt", null, label), h("dd", null, numberFormat.format(value)));
+
+  const counts = h("dl", { class: "counts" },
+    count("كورسات", c.courses),
+    count("ملاحظات", c.notes),
+    count("مهام", c.tasks),
+    count("لم تبدأ", c.pendingTasks),
+    count("جارية", c.inProgressTasks),
+    count("منجزة", c.completedTasks),
+    count("متأخرة", c.overdueTasks, c.overdueTasks > 0 ? "late" : null));
+
+  const setStatus = (task, status, button) => run(async () => {
+    await api(`/api/tasks/${task.id}/status`, { method: "PATCH", body: { status } });
+    toast(status === COMPLETED ? "أُنجزت المهمة." : "بدأت المهمة.");
+    await renderHome();
+  }, button);
+
+  const urgent = dashboard.urgentTasks.length === 0
+    ? h("p", { class: "empty" }, "لا شيء عاجل. هنا تظهر المهام غير المنجزة التي تستحق اليوم أو خلال الأيام الثلاثة القادمة.")
+    : h("ul", { class: "list" }, dashboard.urgentTasks.map((task) => h("li", null,
+        h("span", null, h("span", { class: task.isOverdue ? "marker overdue" : "marker" }, task.title)),
+        h("div", { class: "meta" },
+          task.isOverdue ? h("span", { class: "late-tag" }, "متأخرة") : null,
+          h("span", null, "تستحق " + formatDate(task.dueDate)),
+          h("span", null, STATUS_NAMES[task.status]),
+          h("span", null, "الأهمية " + PRIORITY_NAMES[task.priority]),
+          h("span", null, task.courseId ? courseTitle(task.courseId) || "" : "بدون كورس")),
+        h("div", { class: "actions" },
+          task.status === 0 ? h("button", { class: "link", onclick: (e) => setStatus(task, 1, e.currentTarget) }, "ابدأها") : null,
+          h("button", { class: "link", onclick: (e) => setStatus(task, COMPLETED, e.currentTarget) }, "أنجزتها")))));
+
+  const recent = dashboard.recentCourses.length === 0
+    ? h("p", { class: "empty" }, "لا كورسات بعد.")
+    : h("ul", { class: "list recent" }, dashboard.recentCourses.map((course) =>
+        h("li", null, h("button", { onclick: () => go("courses", { type: "course", id: course.id }) },
+          h("span", { class: "name" }, course.title),
+          h("span", { class: "meta" }, "آخر نشاط " + formatDate(course.lastActivityAt))))));
+
+  $("view").replaceChildren(
+    counts,
+    h("div", { class: "home" },
+      h("section", { class: "sheet" },
+        h("h2", null, "مهام عاجلة"),
+        urgent,
+        h("div", { class: "actions", style: "margin-top:12px" },
+          h("button", { class: "link", onclick: () => go("tasks") }, "كل مهامك"))),
+      h("section", { class: "sheet" }, h("h2", null, "آخر الكورسات"), recent)));
+}
+
+// ---- Courses ----------------------------------------------------------------
+async function renderCourses() {
+  await loadCourses();
+
+  if (state.open?.type === "course" && !courseTitle(state.open.id)) state.open = null;
+  const isOpen = (type, id) => state.open?.type === type && (type === "standalone" || state.open.id === id);
+  const open = (target) => { state.open = target; state.form = null; rerender(); };
+
+  const aside = h("aside", { class: "sheet" },
+    h("h2", null, "الكورسات"),
+    state.form === "course-new"
+      ? courseForm(null)
+      : h("button", { class: "btn quiet", onclick: () => { state.form = "course-new"; rerender(); } }, "كورس جديد"),
+    h("ul", { class: "courses" },
+      state.courses.map((course) => h("li", null, h("button", {
+        "aria-current": String(isOpen("course", course.id)),
+        onclick: () => open({ type: "course", id: course.id })
+      }, course.title))),
+      h("li", null, h("button", {
+        class: "standalone",
+        "aria-current": String(isOpen("standalone")),
+        onclick: () => open({ type: "standalone" })
+      }, "بدون كورس"))));
+
+  let pane;
+  if (!state.open) {
+    pane = h("section", { class: "sheet" }, h("p", { class: "empty" },
+      state.courses.length ? "اختر كورسًا من القائمة." : "أنشئ أول كورس من «كورس جديد»."));
+  } else if (state.open.type === "course") {
+    pane = await coursePane(state.courses.find((c) => c.id === state.open.id));
+  } else {
+    pane = await standalonePane();
+  }
+
+  $("view").replaceChildren(h("div", { class: "content" }, aside, pane));
+}
+
+function courseForm(course) {
+  const submit = h("button", { class: "btn", type: "submit" }, course ? "احفظ" : "أنشئ الكورس");
+  const form = h("form", { class: course ? "stack panel" : "stack", onsubmit: (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    const body = { title: data.title, description: data.description || null };
+    run(async () => {
+      if (course) {
+        await api(`/api/courses/${course.id}`, { method: "PUT", body });
+        toast("حُفظ الكورس.");
+      } else {
+        const created = await api("/api/courses", { method: "POST", body });
+        state.open = { type: "course", id: created.courseId };
+        toast("أُنشئ الكورس.");
+      }
+      state.form = null;
+      await render();
+    }, submit);
+  } },
+    h("label", null, "اسم الكورس", h("input", { name: "title", required: true, maxlength: 200, value: course?.title })),
+    h("label", null, "وصف (اختياري)", h("textarea", { name: "description", maxlength: 2000 }, course?.description || "")),
+    h("div", { class: "actions" }, submit,
+      h("button", { class: "link", type: "button", onclick: () => { state.form = null; rerender(); } }, "إلغاء")));
+  setTimeout(() => form.querySelector("input").focus());
+  return form;
+}
+
+async function coursePane(course) {
+  const items = await api(`/api/courses/${course.id}/tree`);
+
+  const remove = (button) => {
+    if (!confirm(`حذف «${course.title}» يحذف كل ما فيه من ملاحظات ومهام. متأكد؟`)) return;
+    run(async () => {
+      await api(`/api/courses/${course.id}`, { method: "DELETE" });
+      state.open = null;
+      toast("حُذف الكورس.");
+      await render();
+    }, button);
+  };
+
+  return h("section", { class: "sheet" },
+    h("div", { class: "pane-head" },
+      h("h2", null, course.title),
+      h("div", { class: "actions" },
+        h("button", { class: "link", onclick: () => { state.form = "course-edit"; rerender(); } }, "عدّل الكورس"),
+        h("button", { class: "link danger", onclick: (e) => remove(e.currentTarget) }, "احذف الكورس"))),
+    course.description ? h("p", { class: "muted" }, course.description) : null,
+    state.form === "course-edit" ? courseForm(course) : null,
+    adders({ courseId: course.id }),
+    tree(items));
+}
+
+async function standalonePane() {
+  const page = await api(`/api/items?page=1&pageSize=${PAGE_SIZE}`);
+  // One subtree per root: the API has no single tree for everything outside a course
+  const subtrees = await Promise.all(page.items.map((root) => api(`/api/items/${root.id}/tree`)));
+
+  return h("section", { class: "sheet" },
+    h("div", { class: "pane-head" }, h("h2", null, "بدون كورس")),
+    h("p", { class: "muted" }, "ملاحظات ومهام لا تتبع أي مادة."),
+    adders({ courseId: null }),
+    tree(subtrees.flat()));
+}
+
+// Two clear buttons instead of a type selector; the form opens only when asked for
+function adders({ courseId }) {
+  const openAdd = (kind) => { state.form = "add:root"; state.addKind = kind; rerender(); };
+  if (state.form === "add:root") {
+    return h("div", { class: "panel" }, composer({ courseId, parentItemId: null }));
+  }
+  return h("div", { class: "adders" },
+    h("button", { class: "btn quiet", onclick: () => openAdd("note") }, "+ ملاحظة"),
+    h("button", { class: "btn quiet", onclick: () => openAdd("task") }, "+ مهمة"));
+}
+
+function composer({ courseId, parentItemId }) {
+  const isTask = state.addKind === "task";
+  const choose = (kind) => { state.addKind = kind; rerender(); };
+
+  const submit = h("button", { class: "btn", type: "submit" }, isTask ? "أضف المهمة" : "أضف الملاحظة");
+  const form = h("form", { class: "stack", onsubmit: (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    // A child inherits its parent's course: sending both is rejected by the API
+    const base = { title: data.title, content: data.content || null, parentItemId, courseId: parentItemId ? null : courseId };
+    run(async () => {
+      if (isTask) {
+        await api("/api/tasks", { method: "POST", body: {
+          ...base, priority: Number(data.priority), dueDate: riyadhInputToUtc(data.dueDate)
+        } });
+      } else {
+        await api("/api/notes", { method: "POST", body: base });
+      }
+      state.form = null;
+      toast(isTask ? "أُضيفت المهمة." : "أُضيفت الملاحظة.");
+      await render();
+    }, submit);
+  } },
+    h("div", { class: "segmented", role: "group", "aria-label": "النوع" },
+      h("button", { type: "button", "aria-pressed": String(!isTask), onclick: () => choose("note") }, "ملاحظة"),
+      h("button", { type: "button", "aria-pressed": String(isTask), onclick: () => choose("task") }, "مهمة")),
+    h("label", null, "العنوان", h("input", { name: "title", required: true, maxlength: TITLE_MAX })),
+    h("label", null, "النص (اختياري)", h("textarea", { name: "content" })),
+    isTask ? h("div", { class: "row" },
+      h("label", null, "الأهمية", h("select", { name: "priority" },
+        PRIORITY_NAMES.map((name, value) => h("option", { value, selected: value === 1 }, name)))),
+      h("label", null, "الموعد (اختياري، بتوقيت الرياض)", h("input", { name: "dueDate", type: "datetime-local" }))) : null,
+    h("div", { class: "actions" }, submit,
+      h("button", { class: "link", type: "button", onclick: () => { state.form = null; rerender(); } }, "إلغاء")));
+  setTimeout(() => form.querySelector("input[name=title]").focus());
+  return form;
+}
+
+// ---- The tree ----------------------------------------------------------------
+function tree(items) {
+  const byParent = new Map();
+  for (const item of items) {
+    const key = item.parentItemId ?? "root";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(item);
+  }
+
+  const branch = (key) => {
+    const children = byParent.get(key) || [];
+    if (children.length === 0) return null;
+    return h("ul", { class: "tree" }, children.map((item) =>
+      h("li", { class: "node" }, nodeView(item), branch(item.id))));
+  };
+
+  return branch("root") || h("p", { class: "empty" }, "لا شيء هنا بعد. أضف أول ملاحظة أو مهمة.");
+}
+
+function nodeView(item) {
+  const isTask = item.kind === TASK;
+  const canHaveChildren = item.depth < MAX_DEPTH;
+  const openForm = (form, kind) => { state.form = form; if (kind) state.addKind = kind; rerender(); };
+
+  const actions = h("div", { class: "actions" },
+    !isTask ? h("button", { class: "link", onclick: (e) => summarize(item, e.currentTarget) }, "لخّص") : null,
+    !isTask && canHaveChildren ? h("button", { class: "link", onclick: (e) => suggestTasks(item, e.currentTarget) }, "اقترح مهامًا") : null,
+    canHaveChildren ? h("button", { class: "link", onclick: () => openForm("add:" + item.id, "note") }, "أضف تحتها") : null,
+    h("button", { class: "link", onclick: () => openForm("edit:" + item.id) }, "عدّل"),
+    h("button", { class: "link danger", onclick: (e) => deleteItem(item, e.currentTarget) }, "احذف"));
+
+  let form = null;
+  if (state.form === "add:" + item.id) form = h("div", { class: "panel" }, composer({ courseId: null, parentItemId: item.id }));
+  else if (state.form === "edit:" + item.id) form = editForm(item);
+
+  return h("div", null,
+    h("div", { class: "node-head" },
+      h("span", { class: isTask ? "kind task" : "kind" }, isTask ? "مهمة" : "ملاحظة"),
+      h("span", { class: isTask && item.status === COMPLETED ? "title completed" : "title" }, item.title)),
+    item.content ? h("p", { class: "body" }, item.content) : null,
+    isTask ? taskControls(item) : null,
+    actions,
+    form,
+    aiPanel(item));
+}
+
+function editForm(item) {
+  const submit = h("button", { class: "btn", type: "submit" }, "احفظ");
+  const form = h("form", { class: "stack panel", onsubmit: (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    run(async () => {
+      await api(`/api/items/${item.id}`, { method: "PATCH", body: { title: data.title, content: data.content || null } });
+      state.form = null;
+      toast("حُفظت التعديلات.");
+      await render();
+    }, submit);
+  } },
+    h("label", null, "العنوان", h("input", { name: "title", required: true, maxlength: TITLE_MAX, value: item.title })),
+    h("label", null, "النص", h("textarea", { name: "content" }, item.content || "")),
+    h("div", { class: "actions" }, submit,
+      h("button", { class: "link", type: "button", onclick: () => { state.form = null; rerender(); } }, "إلغاء")));
+  setTimeout(() => form.querySelector("input").focus());
+  return form;
+}
+
+function deleteItem(item, button) {
+  if (!confirm(`حذف «${item.title}» يحذف كل ما تحته أيضًا. متأكد؟`)) return;
+  run(async () => {
+    await api(`/api/items/${item.id}`, { method: "DELETE" });
+    delete state.ai[item.id];
+    toast("حُذف.");
+    await render();
+  }, button);
+}
+
+// ---- AI: nothing is written until the user says so (§15.2) ----------------------
+function summarize(note, button) {
+  run(async () => {
+    const result = await api(`/api/notes/${note.id}/summarize`, { method: "POST" });
+    state.ai[note.id] = { summary: result.summary, tokens: result.tokensUsed };
+    await loadMe();
+    await render();
+  }, button);
+}
+
+function suggestTasks(note, button) {
+  run(async () => {
+    const result = await api(`/api/notes/${note.id}/extract-tasks`, { method: "POST" });
+    state.ai[note.id] = { suggestions: result.suggestions, tokens: result.tokensUsed };
+    await loadMe();
+    if (result.suggestions.length === 0) toast("لم يجد الذكاء الاصطناعي مهامَّ في هذه الملاحظة.");
+    await render();
+  }, button);
+}
+
+// A summary is saved as a note under the one it summarizes, so the user's own text is never
+// overwritten. At the maximum depth no child is possible, so it is appended instead
+function saveSummary(note, button) {
+  const summary = state.ai[note.id].summary;
+  run(async () => {
+    if (note.depth < MAX_DEPTH) {
+      const title = ("ملخص: " + note.title).slice(0, TITLE_MAX);
+      await api("/api/notes", { method: "POST", body: { title, content: summary, parentItemId: note.id, courseId: null } });
+    } else {
+      const content = (note.content ? note.content + "\n\n" : "") + "الملخص: " + summary;
+      await api(`/api/items/${note.id}`, { method: "PATCH", body: { title: note.title, content } });
+    }
+    delete state.ai[note.id];
+    toast("حُفظ الملخص.");
+    await render();
+  }, button);
+}
+
+function addSuggestions(note, indexes, button) {
+  const suggestions = state.ai[note.id].suggestions;
+  run(async () => {
+    for (const index of indexes) {
+      const s = suggestions[index];
+      await api("/api/tasks", { method: "POST", body: {
+        title: s.title, content: s.content, parentItemId: note.id, courseId: null, priority: 1, dueDate: null
+      } });
+    }
+    state.ai[note.id].suggestions = suggestions.filter((_, i) => !indexes.includes(i));
+    toast(addedMessage(indexes.length));
+    await render();
+  }, button);
+}
+
+// Arabic counts: one, two (dual), three to ten (plural), eleven and up (singular)
+function addedMessage(count) {
+  if (count === 1) return "أُضيفت المهمة.";
+  if (count === 2) return "أُضيفت مهمتان.";
+  if (count <= 10) return `أُضيفت ${count} مهام.`;
+  return `أُضيفت ${count} مهمة.`;
+}
+
+function aiPanel(note) {
+  const result = state.ai[note.id];
+  if (!result) return null;
+  const close = () => { delete state.ai[note.id]; rerender(); };
+  const tokens = h("p", { class: "meta" }, `استهلكت العملية ${numberFormat.format(result.tokens)} توكن`);
+
+  if (result.summary) {
+    return h("div", { class: "ai" },
+      h("h3", null, "الملخص"),
+      h("p", null, result.summary),
+      h("p", { class: "muted" }, "لا يُحفظ الملخص إلا إذا حفظته."),
+      tokens,
+      h("div", { class: "actions" },
+        h("button", { class: "btn", onclick: (e) => saveSummary(note, e.currentTarget) },
+          note.depth < MAX_DEPTH ? "احفظه كملاحظة تحتها" : "أضفه إلى نص الملاحظة"),
+        h("button", { class: "link", onclick: close }, "أغلق")));
+  }
+
+  const suggestions = result.suggestions || [];
+  if (suggestions.length === 0) return null;
+
+  return h("div", { class: "ai" },
+    h("h3", null, "مهام مقترحة"),
+    h("p", { class: "muted" }, "لا تُضاف أي مهمة إلا باختيارك."),
+    h("ul", { class: "list" }, suggestions.map((s, index) => h("li", null,
+      h("span", { class: "title" }, s.title),
+      s.content ? h("span", { class: "muted" }, s.content) : null,
+      h("div", { class: "actions" },
+        h("button", { class: "link", onclick: (e) => addSuggestions(note, [index], e.currentTarget) }, "أضفها كمهمة"),
+        h("button", { class: "link", onclick: () => {
+          state.ai[note.id].suggestions = suggestions.filter((_, i) => i !== index);
+          rerender();
+        } }, "تجاهل"))))),
+    tokens,
+    h("div", { class: "actions" },
+      suggestions.length > 1
+        ? h("button", { class: "btn", onclick: (e) => addSuggestions(note, suggestions.map((_, i) => i), e.currentTarget) }, "أضف الكل")
+        : null,
+      h("button", { class: "link", onclick: close }, "أغلق")));
+}
+
+// ---- Tasks: every task, wherever it lives ------------------------------------
+// The API has no "all my tasks" endpoint: the dashboard shows only what is urgent (§15.4).
+// So this view reads every course tree and every standalone tree — one request per course,
+// fine for a person's handful of courses, and the first thing to replace with a paginated
+// endpoint if this page ever became a product
+async function loadAllTasks() {
+  await loadCourses();
+  const courseTrees = await Promise.all(state.courses.map((c) => api(`/api/courses/${c.id}/tree`)));
+  const roots = await api(`/api/items?page=1&pageSize=${PAGE_SIZE}`);
+  const standaloneTrees = await Promise.all(roots.items.map((r) => api(`/api/items/${r.id}/tree`)));
+  return [...courseTrees.flat(), ...standaloneTrees.flat()].filter((i) => i.kind === TASK);
+}
+
+async function renderTasks() {
+  const all = await loadAllTasks();
+  const filters = { open: "غير المنجزة", done: "المنجزة", all: "الكل" };
+  const shown = all
+    .filter((t) => state.taskFilter === "all" || (state.taskFilter === "done") === (t.status === COMPLETED))
+    .sort((a, b) =>
+      (a.dueDate ? Date.parse(a.dueDate) : Infinity) - (b.dueDate ? Date.parse(b.dueDate) : Infinity)
+      || b.priority - a.priority
+      || a.title.localeCompare(b.title, "ar"));
+
+  const list = shown.length === 0
+    ? h("p", { class: "empty" }, all.length === 0
+        ? "لا مهام بعد. أضف مهمة داخل كورس، أو في «بدون كورس»."
+        : "لا مهام في هذا التصنيف.")
+    : h("ul", { class: "list" }, shown.map((task) => h("li", null,
+        h("div", { class: "task-row" },
+          h("span", { class: task.status === COMPLETED ? "title completed" : "title" }, task.title),
+          h("button", { class: "link course", onclick: () => go("courses", task.courseId ? { type: "course", id: task.courseId } : { type: "standalone" }) },
+            task.courseId ? courseTitle(task.courseId) || "كورس" : "بدون كورس")),
+        task.content ? h("span", { class: "muted" }, task.content) : null,
+        taskControls(task))));
+
+  $("view").replaceChildren(h("section", { class: "sheet" },
+    h("div", { class: "pane-head" },
+      h("h2", null, "المهام"),
+      h("div", { class: "segmented", role: "group", "aria-label": "التصنيف" },
+        Object.entries(filters).map(([key, label]) => h("button", {
+          "aria-pressed": String(state.taskFilter === key),
+          onclick: () => { state.taskFilter = key; state.form = null; rerender(); }
+        }, label)))),
+    h("p", { class: "muted" }, "مرتبة بالموعد، الأقرب أولًا، ثم بالأهمية."),
+    list));
+}
+
+// ---- Admin (UC-09) ------------------------------------------------------------
+async function renderAdmin() {
+  if (state.me.role !== ADMIN_ROLE) { state.view = "home"; return renderHome(); }
+
+  const input = h("input", { class: "ltr", placeholder: "00000000-0000-0000-0000-000000000000", "aria-label": "رقم الحساب" });
+  const submit = h("button", { class: "btn danger", type: "submit" }, "عطّل الحساب");
+  const form = h("form", { class: "stack", onsubmit: (event) => {
+    event.preventDefault();
+    const id = input.value.trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      toast("رقم الحساب غير صحيح.", { error: true, details: "Expected a GUID." });
+      return;
+    }
+    if (id.toLowerCase() === state.me.id.toLowerCase()) {
+      toast("لا تعطّل حسابك أنت: لن تستطيع الدخول بعدها.", { error: true });
+      return;
+    }
+    if (!confirm("الحساب المعطّل لا يستطيع الدخول ولا تجديد جلسته، ولا يمكن إعادة تفعيله من الواجهة. متأكد؟")) return;
+    run(async () => {
+      try {
+        await api(`/api/admin/users/${id}/deactivate`, { method: "PATCH" });
+      } catch (error) {
+        // The role travels inside the access token: a token from before the promotion says "user"
+        if (error instanceof ApiError && error.status === 403) {
+          toast("ليست لديك صلاحية المسؤول في هذه الجلسة. اخرج وادخل مرة أخرى، ثم أعد المحاولة.", { error: true });
+          return;
+        }
+        throw error;
+      }
+      input.value = "";
+      toast("عُطّل الحساب.");
+    }, submit);
+  } },
+    h("label", null, "رقم الحساب", input),
+    h("div", { class: "actions" }, submit));
+
+  $("view").replaceChildren(h("section", { class: "sheet", style: "max-width:640px" },
+    h("h2", null, "الإدارة"),
+    h("p", null, "المسؤول يستطيع تعطيل أي حساب. الحساب المعطّل لا يستطيع الدخول ولا تجديد جلسته، والجلسة المفتوحة فيه تنتهي خلال 15 دقيقة على الأكثر."),
+    h("p", { class: "muted" }, "رقم الحساب يظهر لصاحبه في «حسابي» أعلى الصفحة: ادخل بالحساب الذي تريد تعطيله، وانسخ رقمه، ثم ارجع إلى حساب المسؤول."),
+    form));
+}
+
+// ---------------------------------------------------------------------------
+// Start: resume the tab's session if its refresh token is still valid
+// ---------------------------------------------------------------------------
+(async () => {
+  if (!state.refresh) return renderAuth();
+  try {
+    await refreshSession();
+    await enterApp();
+  } catch (error) {
+    if (error instanceof SessionLost) renderAuth();
+    else toast("تعذّر الاتصال بالخادم. تأكد أن الـ API يعمل ثم أعد تحميل الصفحة.", { error: true });
+  }
+})();
+</script>
+</body>
+</html>

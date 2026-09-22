@@ -180,6 +180,12 @@ namespace StudyHub.Infrastructure.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TokenHash")
@@ -212,9 +218,6 @@ namespace StudyHub.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
-                    b.Property<DateTime>("LastTokenResetDate")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<int>("MonthlyTokenQuota")
                         .HasColumnType("integer");
 
@@ -222,8 +225,10 @@ namespace StudyHub.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<int>("TokensUsedThisMonth")
-                        .HasColumnType("integer");
+                    b.Property<int>("Role")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -233,7 +238,10 @@ namespace StudyHub.Infrastructure.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_User_RoleValue", "\"Role\" BETWEEN 0 AND 1");
+                        });
                 });
 
             modelBuilder.Entity("StudyHub.Domain.Entities.Note", b =>

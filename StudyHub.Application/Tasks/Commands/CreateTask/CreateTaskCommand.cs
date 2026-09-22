@@ -3,7 +3,10 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Application.Tasks.Commands.CreateTask;
 
-// ParentItemId و CourseId متعامدان: الجذر يأخذ كورسًا، والابن يرث كورس أبيه
+/// <summary>
+/// Creates a task for the caller. ParentItemId and CourseId are orthogonal: a root takes a
+/// course, and a nested item inherits its parent's course rather than naming one.
+/// </summary>
 public record CreateTaskCommand(
     string Title,
     string? Content,

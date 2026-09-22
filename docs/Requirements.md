@@ -1,17 +1,21 @@
-# StudyHub — Engineering Requirements (PRD) v2.0
+# StudyHub — Engineering Requirements (PRD) v3.1
 
 > **Scope of this document**: *what* the system does and *why* each decision was made.
 > For *how it is built*, see `docs/ARCHITECTURE.md`. For *code style*, see `docs/CODING_STANDARDS.md`. For *problems hit and fixed*, see `docs/TROUBLESHOOTING.md`.
 >
-> **v2.0 supersedes v1.1 entirely.** The data model changed fundamentally in M5: `Notes` and `Tasks` are no longer separate tables. Any statement in an older document that contradicts this one is stale.
+> **Status: complete.** Every milestone in §11, M1 to M10.1, is built and verified. This document describes the system as it exists; the only things not built are those §12 defers by decision.
+>
+> **Reading convention.** A milestone named in the text — *(M6)*, *(M8.1)* — says **where** something was built or decided, never that it is missing. The ADR table in §5 is a record: a decision that was later replaced keeps its row, marked "superseded by", because other text refers to it by number.
+>
+> **History.** v3.0 added §14 (cross-cutting rules) and §15 (the AI integration model) and decided everything v2.0 had left open. v3.1 marks the roadmap complete.
 
 ---
 
 ## 1. Project Vision
 
-StudyHub is a backend API for managing courses, study notes, and tasks, with AI-assisted extraction of actionable tasks from raw notes.
+StudyHub is a backend API for managing courses, study notes, and tasks, with AI summaries of notes and AI-suggested tasks extracted from them, which the user approves before anything is written. The API also serves one demo page, so the whole system can be tried in a browser; it is a way to try the system, not a product frontend (ADR-48).
 
-This is a **personal learning project**. The explicit goal is to practice professional .NET backend engineering — Clean Architecture, CQRS, domain modelling, schema design, and a disciplined verification habit — not to ship the fastest possible MVP. Where a decision has a cost, that cost is written down rather than hidden.
+This is a **personal learning project**. The explicit goal is to practise professional .NET backend engineering — Clean Architecture, CQRS, domain modelling, schema design, and a disciplined verification habit — not to ship the fastest possible MVP. Where a decision has a cost, that cost is written down rather than hidden.
 
 ---
 
@@ -20,22 +24,31 @@ This is a **personal learning project**. The explicit goal is to practice profes
 ### Identity & Access Management
 - **UC-01**: As a user, I can register and log in securely so that my data is protected.
 - **UC-02**: As a user, my session stays active through refresh tokens without frequent manual logins, and a stolen token can be revoked.
+- **UC-09**: As an administrator, I can deactivate a user's account, so that an abusive or compromised account can be stopped without deleting anything the person wrote.
+
+> **UC-09 is numbered 09, not 03.** Numbers are never reused and never shifted: every other document, test name, and log entry that already points at UC-03 through UC-08 would otherwise point at the wrong thing. The same reasoning gave M5.1 a decimal instead of a whole number (§11).
+
+> **Why deactivation is the first and only administrative capability.** `User.Deactivate` has existed since M3 with no caller — a behaviour that nothing can invoke is not merely unused, it is unproven. UC-09 gives it one. A capability such as listing users is *not* in scope here: it will be added when an endpoint needs it, not in advance (ADR-31, and the A16 precedent — two of three planned tree operations were built and then never needed).
 
 ### Content Management (Core Domain)
-- **UC-03**: As a user, I can create, edit, and archive (soft-delete) courses. A course is always a top-level container and is never nested inside anything.
+- **UC-03**: As a user, I can create, edit, and delete courses. Deletion is a soft delete — the row stays in the database — but it is not reversible through the API. A course is always a top-level container and is never nested inside anything.
 - **UC-04**: As a user, I can create notes and tasks that either stand alone, sit under a course, or nest under another note or task — in any combination, up to five levels deep. Tasks additionally carry a status (Pending, InProgress, Completed), a priority, and an optional due date.
-- **UC-05**: As a system, archiving any node archives its entire subtree across every level, using soft delete so nothing is physically removed from the database.
+- **UC-05**: As a system, deleting any node deletes its entire subtree across every level, using soft delete so nothing is physically removed from the database.
 
-> **UC-05 reverses v1.1 deliberately.** The previous wording specified *"Soft-Delete Cascade prevention"* — archiving a course was supposed to leave its tasks untouched. The current design does the opposite: archiving cascades down the whole tree. This is an intentional change of direction, not a correction of a bug. Rationale in ADR-08 and ADR-09.
+> **UC-03 and UC-05 no longer say "archive" (v3.0).** v2.0 used the word *archive*, which promises the user that what was archived can be seen and restored. §12 states that correct restore is impossible with the current `IsDeleted` design. A document that promises what the design cannot deliver is worse than one that admits the gap. The word is now *delete*. The `DeletedAt` + `DeletedBatchId` change that would make restore possible is deferred — see §12 and ADR-25.
+
+> **UC-05 reverses v1.1 deliberately.** The v1.1 wording specified *"Soft-Delete Cascade prevention"* — deleting a course was supposed to leave its tasks untouched. The current design does the opposite: deletion cascades down the whole tree. This is an intentional change of direction, not a correction of a bug. Rationale in ADR-08 and ADR-09.
 
 ### AI Integration & Cost Control
-- **UC-06**: As a user, I can submit a note to an AI service to extract structured, actionable tasks. Extracted tasks are created as children of the source note, so the provenance is visible in the tree itself.
-- **UC-07**: As a system, I enforce a **monthly** AI token quota per user to prevent abuse and control external API cost.
+- **UC-06**: As a user, I can submit a note to an AI service and receive suggested actionable tasks. Nothing is written until I approve a suggestion; each approved task is created as a child of the source note, so the provenance is visible in the tree itself. A note already at maximum depth cannot be used as an extraction source — see §15.2.
+- **UC-07**: As a system, I enforce a **monthly** AI token quota per user to prevent abuse and control external API cost. The quota is checked *before* the external call, never only after it — see §15.1.
 
-> **UC-07 clarifies v1.1.** The old text said "daily/monthly" while the code has only ever implemented a monthly quota (`MonthlyTokenQuota`, `TokensUsedThisMonth`, `LastTokenResetDate`). Monthly is the decision.
+> **UC-06 makes the approval explicit (v3.0).** `ARCHITECTURE.md` §4.6 already settled "human in the loop", while v2.0's wording — "extracted tasks are created" — read as if tasks were written automatically. Approval needs no endpoint of its own: the client creates each approved task through the existing `POST /api/tasks`. See §15 and ADR-28.
+
+> **UC-07 clarifies v1.1.** The old text said "daily/monthly" while the code has only ever implemented a monthly quota (`MonthlyTokenQuota` on `Users`; since M8.1 the usage itself is summed from `AiUsageLogs` rather than stored, ADR-39). Monthly is the decision.
 
 ### Data Aggregation
-- **UC-08**: As a frontend application, I can fetch a full user dashboard (statistics, active courses, urgent tasks) from a single optimized endpoint, with no N+1 queries.
+- **UC-08**: As a frontend application, I can fetch a full user dashboard from a single optimized endpoint, with no N+1 queries. The dashboard's exact contents are defined in §15.4 — a use case whose output is not enumerable cannot be finished, only extended.
 
 ---
 
@@ -57,9 +70,9 @@ This section is the authoritative description of the content tree. It is the par
 
 1. **A course is always a root.** The `Courses` table has no parent column, so this is structurally impossible to violate — no constraint needed.
 2. **Free nesting between items.** A task may be a child of a note, a note a child of a task. The parent's type is irrelevant because both are `Item`.
-3. **Maximum depth is five levels** — `Depth` runs 0 to 4. Enforced in the entity (`Item.MaxDepth`) *and* by `CK_Item_Depth`.
+3. **Maximum depth is five levels** — `Depth` runs 0 to 4. Enforced in the entity (`Item.MaxDepth`) *and* by `CK_Item_Depth`. A request that would exceed it is refused by the handler with 409 before the entity is called (ADR-30).
 4. **Depth is stored, not computed.** Because node moving is not supported (rule 7), an item's depth is fixed at creation and never changes. `CK_Item_RootDepth` enforces that `ParentItemId IS NULL` if and only if `Depth = 0`.
-5. **A child inherits its parent's `CourseId`.** Passing a different course alongside a parent is rejected by the validator; the entity ignores it regardless. This is deliberate duplication (ADR-09).
+5. **A child inherits its parent's `CourseId`.** A request that sends a course together with a parent is rejected by the validator — *any* course, the parent's own included, because sending both is ambiguous rather than a preference. The entity ignores the value regardless. This is deliberate duplication (ADR-09).
 6. **Ownership unity.** A child's `UserId` always equals its parent's. Enforced inside `Item.Initialize` — so a handler that forgets to check ownership still cannot produce a cross-owner link.
 7. **Node moving is not supported.** An item's parent is fixed at creation. This is a deliberate deferral, and three consequences follow from it:
    - Cycles are impossible. A newly created child has no descendants, so it cannot enclose its own ancestor. No cycle detection code exists, and none is needed while this rule holds.
@@ -67,8 +80,9 @@ This section is the authoritative description of the content tree. It is the par
    - `CourseId` never changes, which is what makes rule 5 safe.
 
    **If node moving is ever added, all three collapse at once.** It would require cycle detection, depth recalculation for the entire moved subtree (`parent depth + subtree height ≤ max`), and a `CourseId` rewrite down every descendant.
-8. **Deleting a node soft-deletes its whole subtree**, across every level, in a single transaction.
-9. **Deleting a course soft-deletes the course and every item carrying its `CourseId`** — which, by rule 5, is the entire tree at every depth. No recursive traversal is needed.
+8. **An item's `Kind` is permanent.** A note cannot become a task, or the reverse. This is not a policy that could be relaxed later for free: under TPH, EF Core derives the discriminator from the object's CLR type, and an object cannot change its type — so a type change is a delete and a create, not an update. The new item gets a new id, and the old item's children cannot follow it: moving them is forbidden (rule 7), so deleting the old item deletes them too (rule 9). `PATCH /api/items/{id}` therefore never touches `Kind`. **(New in v3.0 — the rule existed in the tooling but was written nowhere.)**
+9. **Deleting a node soft-deletes its whole subtree**, across every level, in a single transaction.
+10. **Deleting a course soft-deletes the course and every item carrying its `CourseId`** — which, by rule 5, is the entire tree at every depth. No recursive traversal is needed.
 
 ### 3.3 Entity behaviour
 
@@ -76,19 +90,27 @@ Entities are rich: private setters, private constructors, static factory methods
 
 | Entity | Behaviour |
 |---|---|
-| `User` | `Create`, `ConsumeTokens`, `ResetQuotaIfNeeded`, `Deactivate`, `ChangePassword` |
+| `User` | `Create`, `HasQuotaFor(used, estimate)`, `Deactivate`, `ChangePassword`; `PromoteToAdmin`, `Can(permission)` |
 | `Course` | `Create`, `UpdateDetails`, `MarkAsDeleted` |
-| `Item` (abstract) | `Initialize` (protected), `UpdateContent`, `MarkAsDeleted` |
+| `Item` (abstract) | `Initialize` (protected), `UpdateContent`, `MarkAsDeleted`; `IsAtMaxDepth` (read-only query, ADR-30) |
 | `Note : Item` | `Create` |
 | `TaskItem : Item` | `Create`, `UpdateStatus`, `UpdateSchedule` |
 | `RefreshToken` | `Create`, `IsActive(utcNow)`, `Revoke(utcNow, replacedBy)` |
 | `AiUsageLog` | `Create` (write-once; no mutators by design) |
 
+> **The quota rule has been rewritten twice.** Before M8, `User.ConsumeTokens` checked and recorded in one method, and threw after a call that had already been paid for. M8 split it into `HasQuotaFor` plus an atomic counter increment. M8.1 removed the counter itself: `HasQuotaFor(used, estimate)` receives the month's usage, summed from `AiUsageLogs`, and the record is one inserted row (ADR-24, ADR-39).
+
+**A rule the handler must ask about is published as a query.** When a handler has to refuse a request that the entity would also refuse, the entity exposes the rule as a read-only member — `IsAtMaxDepth`. The handler asks it and returns a precise 4xx; the mutator asks the same member and throws. The rule is written once and enforced twice. If the mutator's check ever fires, a handler skipped the question: that is a bug, and 500 is the honest answer (ADR-30).
+
+> **`Create` never produces an administrator, and there is no demotion.** The factory always sets `Role = User`; `PromoteToAdmin` is the single path to the other value, named loudly so it cannot pass unnoticed in a review, and tolerant of repetition in the same way `Deactivate` is. Demotion is deferred (§12), which means privilege has exactly one entry point and no exit — the shape that is easiest to audit. `Can(permission)` is the query form of ADR-30: a handler holding a `User` asks the entity instead of computing the answer from the role itself.
+
 **Base classes**: `BaseEntity` holds `Id` + `CreatedAt`. `AuditableEntity : BaseEntity` adds `UpdatedAt`. `AiUsageLog` inherits the former — a usage record is never modified, so an audit field on it would be a permanently null column.
 
 **Value object**: `Email` owns normalization (`Trim().ToLowerInvariant()`) and format validation. It exists because that logic was previously duplicated between `User.Create` and `UserRepository`, and a divergence there means a duplicate account slipping past a unique index.
 
-**Time as a parameter**: methods whose behaviour depends on the clock (`ResetQuotaIfNeeded`, `RefreshToken.IsActive`, `RefreshToken.Revoke`) take the current time as an argument, so they are testable without a clock abstraction. Everything else reads `DateTime.UtcNow` directly — a deliberate limit on how far that pattern is worth pushing.
+**Two ways to build an `Email`, and the difference is deliberate.** `Email.Create` validates and is used at every entry point. `Email.FromPersisted` does not validate and is used only by the EF Core value converter when reading a row. A converter is a mapping, not a gate: if it validated, a single corrupt row would turn every read of that user — including the login lookup — into a 500 instead of a rejected credential. This is the same failure shape as `D4`, in a different place, and the same trust EF Core already extends to entities, which it materializes without calling their factories. **Cost**: `FromPersisted` has to be public, because the converter lives in Infrastructure, so any caller can skip validation; its name is the only guard.
+
+**Time as a parameter**: methods whose behaviour depends on the clock (`RefreshToken.IsActive`, `RefreshToken.Revoke`) take the current time as an argument, so they are testable without a clock abstraction. Everything else reads `DateTime.UtcNow` directly — a deliberate limit on how far that pattern is worth pushing.
 
 ---
 
@@ -106,20 +128,25 @@ C# / .NET 10 with **zero external dependencies**. No EF Core, no ASP.NET Core. T
 ### Infrastructure — `StudyHub.Infrastructure`
 - **EF Core 10** (Code-First) with **Npgsql**.
 - Fluent API only (`IEntityTypeConfiguration<T>`); no Data Annotations on domain entities.
-- **BCrypt.Net-Next** for password hashing.
+- **BCrypt.Net-Next** for password hashing, `Enhanced*` variants only.
+- **`Microsoft.IdentityModel.JsonWebTokens`** (`JsonWebTokenHandler`) for token generation (ADR-29) — not `System.IdentityModel.Tokens.Jwt`, the previous generation of the same library.
+- **`Microsoft.Extensions.Http`** for the typed `HttpClient` the AI provider is called through. A client created per request exhausts sockets under load and caches DNS for the life of the process; `IHttpClientFactory` is the documented way to avoid both, and it is where the explicit timeout (§15.3) is configured. **No provider SDK is added**: the call is plain HTTP and `System.Text.Json` (ADR-35).
 - Implements every interface declared in Application.
 
 ### API — `StudyHub.API`
 - ASP.NET Core **Controllers** (ADR-14). Every action is 3–5 lines: build a command, send it, map the result.
 - `IExceptionHandler` + `ProblemDetails` for centralized error translation (ADR-15).
 - **OpenAPI** via `AddOpenApi()`.
-- JWT Bearer authentication (M6).
+- **`Microsoft.AspNetCore.Authentication.JwtBearer`**.
+- **Rate limiting** with the framework's own middleware — no package (ADR-45).
+- A **background job** that deletes expired refresh tokens; it only sends a command (ADR-46).
+- **Static files**: one demo page, `wwwroot/index.html`, served before authentication (ADR-48).
 
-### Database
-PostgreSQL 15 in Docker Compose. Schema versioned through EF Core Migrations. Referential integrity enforced at the database level, not only in code.
+### Database and containers
+PostgreSQL 15 in Docker Compose. Schema versioned through EF Core Migrations. Referential integrity enforced at the database level, not only in code. The API runs as a second compose service, with its secrets in a git-ignored `.env` (ADR-47).
 
 ### Testing
-xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests` and `StudyHub.Application.Tests`.
+xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests`, `StudyHub.Application.Tests`, and `StudyHub.Infrastructure.Tests`. `StudyHub.IntegrationTests` adds `Microsoft.AspNetCore.Mvc.Testing` and `Testcontainers.PostgreSql` to run the real API against a throwaway PostgreSQL container (ADR-44).
 
 ---
 
@@ -132,18 +159,49 @@ xUnit + Moq + FluentAssertions, across `StudyHub.Domain.Tests` and `StudyHub.App
 | 03 | FluentValidation | Rules declarative, independently testable, run before every handler | A second place to look when tracing a rejection |
 | 04 | EF Core Code-First | Entities are the source of truth; schema history versioned in git | Migration discipline required; the snapshot file is easy to get wrong |
 | 05 | PostgreSQL 15 | Strong relational guarantees; identical in Docker and in most clouds | — |
-| 06 | JWT + refresh token rotation | Stateless auth with revocable sessions | Refresh tokens must be stored, hashed, and rotated |
+| 06 | JWT + refresh token rotation | Stateless auth with revocable sessions | Refresh tokens must be stored, hashed, and rotated. A revoked user keeps a working access token until it expires (ADR-21) |
 | 07 | BCrypt with `Enhanced*` variants | Configurable work factor; pre-hashing removes BCrypt's silent 72-byte truncation | **Irreversible**: standard and enhanced hashes are not interchangeable once stored |
-| 08 | **Notes and tasks in one `Items` table (TPH)** | Distinct types that can nest inside each other is a contradiction the relational model cannot express cheaply. Three alternatives were costed — a polymorphic parent (no foreign key at all), an exclusive arc (six parent columns), a fully dissolved model — and each demanded a real sacrifice. Unifying the two types removes the contradiction instead of paying for it | `Status`, `Priority`, `DueDate` are nullable at the database level; conditional check constraints replace `NOT NULL` |
+| 08 | **Notes and tasks in one `Items` table (TPH)** | Distinct types that can nest inside each other is a contradiction the relational model cannot express cheaply. Three alternatives were costed — a polymorphic parent (no foreign key at all), an exclusive arc (six parent columns), a fully dissolved model — and each demanded a real sacrifice. Unifying the two types removes the contradiction instead of paying for it | `Status`, `Priority`, `DueDate` are nullable at the database level; conditional check constraints replace `NOT NULL`. `Kind` becomes immutable (rule 3.2.8) |
 | 09 | **Child inherits `CourseId`** | Deliberate duplication. Makes "delete a course and its whole tree" a single non-recursive query at any depth | Safe **only** while node moving is forbidden. If moving is added, `CourseId` must be rewritten down every descendant |
-| 10 | **`Depth` stored as a column** | Enables `CK_Item_Depth` and `CK_Item_RootDepth` at the database level, and removes the need for a depth-calculation service | Same dependency on rule 3.2.7 as ADR-09 |
+| 10 | **`Depth` stored as a column** | Enables `CK_Item_Depth` and `CK_Item_RootDepth` at the database level, and removes the need for a depth-calculation service | Same dependency on rule 3.2.7 as ADR-09. Also caps AI extraction depth — see ADR-26 |
 | 11 | Level-by-level subtree fetch, not `WITH RECURSIVE` | "One query per level" only matters when levels are unbounded; depth is capped at five. Staying in LINQ keeps the soft-delete filter applied automatically and avoids a hand-maintained SQL string | At most five round trips instead of two |
-| 12 | Soft delete + EF global query filters | Nothing is ever physically lost | Every table grows and never shrinks; raw SQL bypasses the filter entirely; correct restore is not possible (see §12) |
-| 13 | Repository + Unit of Work over EF Core | Handler tests need no database; the pattern is worth learning | **Technically redundant** — `DbContext` is already a unit of work and `DbSet<T>` already a repository. An extra abstraction layer, and `IQueryable` composition is lost at the boundary |
+| 12 | Soft delete + EF global query filters | Nothing is ever physically lost | Every table grows and never shrinks; raw SQL bypasses the filter entirely; correct restore is not possible until ADR-25 lands |
+| 13 | Repository + Unit of Work over EF Core | Handler tests need no database; the pattern is worth learning | **Technically redundant** — `DbContext` is already a unit of work and `DbSet<T>` already a repository. An extra abstraction layer, and `IQueryable` composition is lost at the boundary — so read queries must project inside Infrastructure, through read-side query interfaces (ADR-32) |
 | 14 | Controllers, not Minimal APIs | Attribute routing, filters, and `[Authorize]` are conventional and well documented | Slightly more ceremony per endpoint |
-| 15 | `IExceptionHandler`, not custom middleware | The modern ASP.NET Core replacement; returns RFC-shaped `ProblemDetails` | `CODING_STANDARDS.md` §4 still says "middleware" and needs updating |
-| 16 | Duplicate token accounting: `User.TokensUsedThisMonth` **and** `AiUsageLogs` | The counter answers "is there quota left" in one read; the log answers "what was it spent on" | They must be updated together, inside one method on `User`, or they drift |
+| 15 | `IExceptionHandler`, not custom middleware | The modern ASP.NET Core replacement; returns RFC-shaped `ProblemDetails` | — |
+| 16 | Duplicate token accounting: `User.TokensUsedThisMonth` **and** `AiUsageLogs` — **superseded by ADR-39 (M8.1)** | The counter answers "is there quota left" in one read; the log answers "what was it spent on" | They must be updated together, inside one method on `User`, or they drift |
 | 17 | Manual DTO mapping via static extension methods | No extra dependency; explicit | Boilerplate per DTO; swappable for AutoMapper/Mapster later without touching Domain |
+| **18** | **All timestamps are UTC; the API rejects any value that is not** | A `DateTime` with `Kind = Unspecified` is not a moment in time, it is a moment in an unstated timezone. Npgsql writes only `Kind = Utc` to a `timestamptz` column: a value without an offset arrives as `Unspecified`, and one with a non-`Z` offset arrives as `Local`, because the JSON reader converts it to server time. Both throw at save, so the alternative to rejecting them is a 500 | A client sending an unambiguous offset such as `+03:00` is also rejected, even though it could be converted. One rule in every validator that carries a `DateTime`, instead of a conversion nobody can see |
+| **19** | **Multiple concurrent sessions; one rotation chain per device** | A user with a phone and a laptop should not be logged out of one by using the other | Reuse detection revokes *every* chain, so one stolen token logs the user out everywhere. The `RefreshTokens` table grows without bound until cleanup lands in M10 |
+| **20** | **The refresh token is returned in the response body, not a cookie** — a demo page exists since M10.1 (ADR-48) | There is no browser client and no frontend. A cookie is a browser-specific optimization that brings CSRF with it, and this project has no CSRF defence | The client is fully responsible for storing it safely. A browser client that puts it in `localStorage` loses it to any XSS |
+| **21** | **The JWT carries `sub`, `jti`, `role`, and the standard registered claims — nothing else** | Every claim is a copy of a database row frozen at issue time. `sub` and `role` are the only two worth freezing: the first can never go stale, and the second changes rarely enough that a 15-minute lag is acceptable. Reading the role from the database on every request would remove the reason JWT was chosen (ADR-06) | Any handler needing the name or email reads the database. Deactivating a user does not invalidate an already-issued access token; it takes effect within the access-token lifetime, at most 15 minutes. **A role change carries the same lag, and demotion is the dangerous direction: a revoked administrator keeps administrative rights for that window.** Shortening the window means shortening the access token for everyone |
+| **22** | **Offset pagination (`page`, `pageSize`), default 20, hard maximum 100** | Per-user datasets are small; offset is simpler and permits jumping to a page | Pages shift when rows are inserted or deleted between requests, and deep offsets get slow. Switch to cursor pagination when either becomes visible |
+| **23** | **A subtree is returned as a flat list, not nested JSON** | Projects straight into a DTO with one `Select`, and needs no self-referencing DTO or recursive mapper. Not chosen for pagination — a tree is never paginated (§14.2) | The client assembles the tree from `ParentItemId`. Roughly ten lines of client code |
+| **24** | **Quota is pre-checked against an estimate; usage recording never throws** | An external call that has already been paid for must never have its result discarded by an accounting rule | The hard guarantee "monthly usage never exceeds the quota" is lost — each request that passes the pre-check may overshoot by the gap between estimate and actual, and parallel requests all pass it before any of them records. Some requests are refused that would have fitted |
+| **25** | **`DeletedAt` + `DeletedBatchId` replace `IsDeleted` — deferred** | Correct restore needs to distinguish an item deleted deliberately from one deleted by cascade. A shared batch id per delete operation answers that in one column | A migration, a query-filter change, a `MarkAsDeleted` signature change, and every test asserting `IsDeleted`. The project is not deployed, so no real data will ever make this change expensive; it is deferred rather than scheduled. |
+| **26** | **AI extraction is refused with 409 when the source note sits at maximum depth** | Approved tasks become children of their source note; a child of a depth-4 note is depth 5, which the entity rejects — so every suggestion would be impossible to approve. Refusing before the external call spends nothing | A user cannot extract from a deeply nested note at all. The alternative — creating the tasks as siblings — would silently break the provenance that is UC-06's entire justification |
+| **27** | **Optimistic concurrency on rotation: PostgreSQL's `xmin` is the concurrency token of `RefreshTokens`** | Rotation reads a row and writes it back. Without a check, two parallel refreshes with one token both succeed and fork the chain into two valid ones, and reuse detection never fires. `xmin` is maintained by PostgreSQL itself, so no column is added; it is mapped in Infrastructure as a shadow property, so no Domain type gains a persistence field | A legitimate client that refreshes twice in parallel loses one request (409) and must serialize its refreshes. No grace window (§12) |
+| **28** | **Extraction returns suggestions; nothing is written until the user approves** | AI output enters the user's tree only through a human decision. Approval needs no endpoint of its own: the client creates each approved task through `POST /api/tasks` with the note as parent. Usage is recorded at extraction time, so approving nothing still costs quota | Once created, an extracted task is indistinguishable from a hand-written one. Suggestions are not stored: a client that loses them pays again to extract again |
+| **29** | **Tokens are generated with `Microsoft.IdentityModel.JsonWebTokens`, not `System.IdentityModel.Tokens.Jwt`** | The latter is the previous generation of the same library, and ASP.NET Core 8+ validates bearer tokens with `JsonWebTokenHandler` by default. Writing and reading tokens with the same handler removes one source of claim-name mismatches (§9.1) | Most tutorials still show `JwtSecurityTokenHandler`; their examples need translating |
+| **30** | **A handler asks the entity before acting; the entity re-checks the same question** | The rule is written once, in the Domain, and enforced twice with two meanings. In the handler it is an expected refusal and becomes a precise 4xx; in the entity it is an invariant that protects every other caller. Ownership already follows this shape (§6) | A handler that forgets to ask returns 500 instead of 409 — the data stays safe, only the status is wrong. Every handler that nests items must ask |
+| **31** | **One `Role` column on `Users`; permissions are code — constants plus a role-to-permissions map in Domain** | Three designs were costed. Full RBAC tables (`Roles`, `Permissions`, `UserRoles`, `RolePermissions`) means four tables, seed data, two joins on every check and eventually an admin screen to edit what never changes — all to tell two roles apart. ASP.NET Core Identity brings its own `DbContext`, its own user entity and its own migrations, so the rich `User` here is either replaced or duplicated and the domain rules move into a library this project does not own. A column plus a code map costs neither. **Permissions in code live in `git` history: reviewed, diffed and tested. A permissions table editable in production is the shortest path to a silent privilege escalation** | Changing what a role may do needs a deployment, not an `UPDATE`. One user cannot hold two roles. A third role needs a migration, because `CK_User_RoleValue` fixes the range. Adding a *capability* to an existing role does not: one constant, one line in the map, one attribute on the endpoint. The Domain carries permission strings that ASP.NET Core consumes as policy names — plain `string`, no dependency, so the zero-dependency rule (§4) holds |
+| **32** | **Read queries go through read-side interfaces that return DTOs (`ICourseQueries`, `IItemQueries`, `IUserQueries`); repositories stay write-side** | Queries must project with `Select` inside Infrastructure (ADR-13, §6). Keeping reads out of the repositories leaves each repository about loading entities for commands, and each query interface about shaping responses | One more interface and implementation per area. The EF projections are not covered by unit tests, because handlers mock the interface; until M10 the proof of a query is calling its endpoint — since M10 the integration suite executes them (ADR-44) |
+| **33** | **Reading another user's resource returns 403, the same as writing it** | The write path already reveals existence through its 403, so a 404 on reads alone would hide nothing; one rule for both paths is simpler | A caller can tell that an id exists |
+| **34** | **`GET /api/courses` returns no item counts** | No client needs them yet, and a count per course is easy to write as an N+1 | A client that wants counts reads the course tree. Counts are added when a consumer asks for them (A16) |
+| **35** | **One provider behind one use-case interface (`IAiService`), plus a fake implementation chosen at startup when no API key is configured** | The Application layer asks for "a summary of this note" or "tasks from this note", not for "a completion". The prompt, the HTTP details, the JSON shape and the token count are provider knowledge and stay in Infrastructure, so a second provider is a second class and one DI line. The fake keeps the feature, its tests and its failure paths runnable with no key, no network and no cost | A new AI operation means a new method on the interface. The fake never proves the real provider works: only a real call does |
+| **36** | **The pre-call quota estimate is `characters / CharsPerToken + ResponseReserveTokens`, from configuration** | The check must happen before the call (ADR-24) and the real cost is known only after it. Input length is free to measure and roughly proportional to tokens; a fixed reserve alone would either block short notes or ignore long ones | It is an approximation. A note whose real cost exceeds the estimate overshoots the quota by the gap, which ADR-24 already accepts |
+| **37** | **Token usage is recorded with one atomic `UPDATE "Users" SET "TokensUsedThisMonth" = "TokensUsedThisMonth" + n`, in the same transaction as the `AiUsageLog` row** — **superseded by ADR-39 (M8.1)** | Two parallel operations must not lose an increment, and a call that has been paid for must never fail on its accounting (§14.4). An atomic increment cannot lose one and cannot conflict, so it needs no concurrency token, no retry and no migration | The increment is written in SQL instead of through a method on `User`, so `ConsumeTokens` is replaced by `HasQuotaFor` (the rule) plus this write (the record). A quota reset landing at the same instant as an increment, at a month boundary, can still overwrite it — a race of one row per month, accepted |
+| **38** | **Summarizing and extracting tasks are two endpoints, not one call returning both** | The user picks one of them for a reason: a summary is text to read, a task is a checkbox to tick, and they appear in different places in any client. Charging for both when the user asked for one is waste, and a response with a filled half and an empty half is a shape no client wants | Two prompts, two result types and two handlers that repeat the same §15 order. `AiUsageLog.OperationType` is what tells the two apart in the record |
+| **39** | **Monthly AI usage is the sum of the month's `AiUsageLogs` rows; `Users` stores no counter** (supersedes ADR-16 and ADR-37) | The counter was a cached copy of the log with an expiry, reset lazily by the user's next AI call. Every reader had to know when it expired, and `GET /api/auth/me` did not, so it showed last month's usage until the first call of a new month; the lazy reset also raced the atomic increment at the month boundary. Summing the log removes the copy: nothing to reset, nothing to go stale, and recording becomes one insert, which parallel operations can neither lose nor collide on. The `(UserId, CreatedAt)` index serves the sum | Every quota check and every `GET /api/auth/me` sums the month's rows instead of reading one column — an index range scan, negligible at per-user scale. A migration drops `TokensUsedThisMonth` and `LastTokenResetDate`, and rolling it back cannot restore their values. The pre-call overshoot of ADR-24 is unchanged |
+| **40** | **Timestamps are stored and exchanged in UTC; business periods are computed in one configured time zone, Asia/Riyadh** | The users are in Riyadh, so "this month" — and, from M9, "today" — must begin at Riyadh midnight, not at UTC midnight three hours later; otherwise the first three hours of a month count toward the previous one. Storage stays UTC because Npgsql writes only UTC to `timestamptz` (ADR-18) and an instant has no time zone — only the question "which month, which day" does. One zone in configuration (`BusinessTime:TimeZoneId`), validated at startup, and one class, `BusinessCalendar`, that answers the question | One zone for every user: a user elsewhere gets Riyadh's months and days. A per-user zone would need a column and a profile field. Clients still send and receive `Z` values, and showing Riyadh time is the client's job |
+| **41** | **"Recent courses" on the dashboard means latest activity: the later of the course's own last change and the newest change among its non-deleted items, at any depth** | A course is used by working inside it — adding a note, ticking a task — and almost never by renaming it, so ordering by the course's own timestamps would leave the course a user just worked in off the list. Every item carries its root's `CourseId` (ADR-09), so "every item of the course, at any depth" is one flat condition, and the newest change is one correlated aggregate inside the same statement: no extra round trip and no migration | A more complex statement, whose order PostgreSQL computes instead of reading it from an index — negligible at per-user scale. Deleting an item is not activity: deleted rows are filtered out, so a delete can move a course down the list. A stored `LastActivityAt` column was rejected: a migration, and every item command would have to remember to touch its course — the drift ADR-16 warns about |
+| **42** | **The dashboard has its own read-side interface, `IDashboardQueries`, with one method; the handler owns the numbers of §15.4 and passes them in; the database is asked exactly three statements** | UC-08 is one use case with one definition, so its read model lives in one place (§6), and its counts span two tables, so no per-area interface is their natural home. The handler reads the clock once and passes the window and the limits, so every rule of §15.4 is visible — and tested — in Application while Infrastructure only translates it. Three fixed statements — every count in one row, the urgent tasks, the recent courses — make the statement count independent of the data, and one statement for every count is one snapshot, so the task statuses always add up to the task total | One more interface and implementation, the cost ADR-32 already accepts. Its SQL is not unit-tested, because the handler test mocks the interface: until M10 the proof is the logged statements and a `psql` comparison — since M10 the integration suite counts them (ADR-44). The counts statement is anchored on the user's own row, a less obvious shape than one `Count` per number |
+| **43** | **The dashboard's lists use their own small DTOs, `UrgentTaskDto` and `RecentCourseDto`, not `ItemDto` and `CourseDto`** | A dashboard shows a title and a date. `ItemDto` carries `Content`, which is deliberately unbounded (§7), so ten urgent tasks could carry ten bodies no dashboard displays. The lists also need fields the shared DTOs lack — `isOverdue` and `lastActivityAt` — and adding them there would change every endpoint that returns those DTOs | Two more records and two more projections. A client that wants a task's body calls `GET /api/items/{id}` |
+| **44** | **Integration tests host the real API in-process (`WebApplicationFactory`) against a throwaway PostgreSQL 15 container (Testcontainers), in their own project** | The unit suites mock every interface, so nothing automated executes the SQL: the read-side projections (ADR-32), the soft-delete filter, the check constraints, `xmin` (ADR-27) and the dashboard's statement budget (ADR-42) are proven only by hand. EF Core's in-memory provider translates none of that SQL, so it would prove nothing. A container per run needs no secret, starts from an empty schema — which also proves the migrations apply from zero — and cannot be polluted by the development database | Two test packages, `Microsoft.AspNetCore.Mvc.Testing` and `Testcontainers.PostgreSql`. Docker must run for `dotnet test`, and the suite takes seconds, not milliseconds. The tests share one container and run serially; each creates its own accounts instead of cleaning up |
+| **45** | **Rate limiting uses the built-in middleware with two policies: `auth` (register, login, refresh) per client IP and `ai` (the two AI operations) per user, 10 requests per 60 seconds each, from configuration; the rejection is 429 with `Retry-After`** | The anonymous endpoints are where §9.4's enumeration and password guessing happen, and the caller's address is the only key they have. The AI endpoints cost money per call and have a user, so a per-user budget stops one account from spending the provider limit everyone shares. The middleware is part of the framework. It runs after authentication, or every AI caller would share one anonymous partition | Behind a proxy or Docker's network, clients can share one address and one `auth` budget; forwarded headers would fix it and are deferred with public exposure (§12). The middleware's default rejection is 503, which misstates the cause, so 429 is set explicitly. Limits are per process, not shared between instances |
+| **46** | **Refresh tokens are deleted 7 days after they expire, by a background job that runs at startup and every 24 hours and sends a MediatR command** | A revoked token must outlive its expiry, not its revocation: reuse detection (§9.3) works by finding a rotated-away token when it is presented again, and deleting that row turns a stolen token into an unknown one — 401 without revoking the chain. After expiry a row can no longer be presented usefully, so expiry plus a margin is the earliest safe point. The job is only a trigger; the rule is a handler, where it is tested | The table keeps each row for its lifetime plus 7 days. A `DELETE` runs daily even when nothing qualifies, and a failed run waits for the next one |
+| **47** | **The API container reads its secrets from environment variables supplied by a git-ignored `.env`; it runs as a non-root user on port 8080 in the Production environment and reaches PostgreSQL by its compose service name** | `user-secrets` exist only in Development (B10), so a container needs another source. Compose's `env_file` needs no package and keeps secrets out of the image and out of git; `.env.example`, which is committed, documents the names without values | The values sit in a plain file on disk — the same exposure as `user-secrets` — and anyone who can run `docker inspect` on the machine can read them. Docker secrets with a key-per-file provider would hide them from `inspect`, at the cost of a package and more compose configuration |
+| **48** | **A single demo page, `wwwroot/index.html`, is served by the API itself; it is a way to try the system, not a product frontend** | Same origin as the API, so no CORS policy is needed; plain HTML and JavaScript, so no package and no build step, and it ships inside the same container. It is served before authentication — the page itself is public, and every API call it makes carries its own token | ADR-20's premise, "there is no browser client", no longer holds literally. The page keeps the access token in memory and the refresh token in `sessionStorage`, which any script on the page could read; that is acceptable only because the page loads no third-party script and writes every server value as text, never as HTML. A real frontend would revisit ADR-20: an HttpOnly cookie plus CSRF protection |
 
 ---
 
@@ -156,15 +214,47 @@ StudyHub.Application/
 ├── Common/
 │   ├── Interfaces/   → ICourseRepository, IItemRepository, IUserRepository,
 │   │                   IUnitOfWork, IPasswordHasher, ICurrentUserService
+│   │                   IRefreshTokenRepository, ITokenService
+│   │                   AccessToken, RefreshTokenResult — the records
+│   │                   ITokenService returns
+│   │                   ICourseQueries, IItemQueries, IUserQueries,
+│   │                   IDashboardQueries — the read side, returning
+│   │                   DTOs (ADR-32, ADR-42)
+│   │                   IAiService, IAiUsageLedger
 │   ├── Behaviors/    → ValidationBehavior.cs
-│   └── Exceptions/   → ConflictException, NotFoundException, ForbiddenException
+│   ├── Settings/     → AiSettings.cs, UserQuotaSettings.cs — plain records
+│   │                   bound and validated at startup in Infrastructure
+│   ├── Pagination/   → PagedResult.cs, Paging.cs (§14.2)
+│   ├── Time/         → BusinessCalendar.cs — business periods in the configured time zone (ADR-40)
+│   ├── Validation/   → PasswordRuleExtensions.cs — the password policy,
+│   │                   shared by registration and administrator seeding
+│   │                   PagingRuleExtensions.cs, UtcDateRuleExtensions.cs
+│   └── Exceptions/   → one file per exception type:
+│                       ConflictException.cs, NotFoundException.cs,
+│                       ForbiddenException.cs
+│                       InvalidCredentialsException.cs
+│                       QuotaExceededException.cs,
+│                       ExternalServiceException.cs
 │
-├── Courses/Commands/{CreateCourse, DeleteCourse}/
+├── Auth/Commands/{Login, Refresh, Logout}/
+├── Auth/Queries/GetCurrentUser/
+├── Courses/                → CourseDto.cs, CourseMappings.cs
+├── Courses/Commands/{CreateCourse, DeleteCourse, UpdateCourse}/
+├── Courses/Queries/{GetCourses, GetCourseTree}/
 ├── Notes/Commands/CreateNote/
-├── Tasks/Commands/CreateTask/
-├── Items/Commands/DeleteItem/
-└── Users/Commands/RegisterUser/
+├── Notes/Commands/{SummarizeNote, ExtractTaskSuggestions}/
+├── Tasks/Commands/{CreateTask, UpdateTaskStatus, UpdateTaskSchedule}/
+├── Items/                  → ItemDto.cs, ItemMappings.cs
+├── Items/Commands/{DeleteItem, UpdateItemContent}/
+├── Items/Queries/{GetItem, GetItemTree, GetRootItems}/
+├── Dashboard/               → DashboardDto.cs, DashboardCountsDto.cs,
+│                              UrgentTaskDto.cs, RecentCourseDto.cs,
+│                              DashboardCriteria.cs
+├── Dashboard/Queries/GetDashboard/
+└── Users/Commands/{RegisterUser, DeactivateUser, SeedAdministrator}/
 ```
+
+**One exception type per file.** Three types sharing one file compiles and runs, but the file name then describes only one of its contents, and the comments inside end up naming files that do not exist.
 
 **Request flow, end to end:**
 1. A controller action builds a Command and calls `mediator.Send(...)`.
@@ -172,7 +262,9 @@ StudyHub.Application/
 3. The handler resolves ownership, calls a domain factory or mutator, and saves through `IUnitOfWork`.
 4. Any exception is translated to a status code by `GlobalExceptionHandler`.
 
-**Defence in depth is deliberate.** Ownership of a parent item is checked twice — once in the handler (to return a precise 403) and once inside `Item.Initialize` (because the entity trusts no caller). Course ownership is checked in the handler only, since the entity receives a `Guid` rather than an object; that asymmetry is known and accepted.
+**Defence in depth is deliberate.** Ownership of a parent item is checked twice — once in the handler (to return a precise 403) and once inside `Item.Initialize` (because the entity trusts no caller). Depth follows the same shape: the handler asks `parent.IsAtMaxDepth` and returns 409, and `Item.Initialize` asks the same member (ADR-30). Course ownership is checked in the handler only, since the entity receives a `Guid` rather than an object; that asymmetry is known and accepted.
+
+**Commands and queries have different fetch rules**. A query projects directly into its DTO with `Select` and never materializes an entity. A command loads the whole entity, because it is about to call a method on it. Since repositories do not expose `IQueryable` (ADR-13), the projection has to run inside Infrastructure, in a read-side query interface (ADR-32).
 
 ---
 
@@ -190,10 +282,11 @@ Five tables: `Users`, `Courses`, `Items`, `RefreshTokens`, `AiUsageLogs`.
 | Email | varchar(150) | required, **unique index**; stored as text via a value converter |
 | PasswordHash | text | required |
 | MonthlyTokenQuota | int | |
-| TokensUsedThisMonth | int | |
-| LastTokenResetDate | timestamptz | |
 | IsActive | bool | |
+| Role | int | required, database default `0`; `CK_User_RoleValue` restricts it to `0`–`1` |
 | CreatedAt / UpdatedAt | timestamptz | UpdatedAt nullable |
+
+`Role` is an integer, not text, for the reason `Kind` is: renaming an enum member must not invalidate stored rows. It carries no index — the column has two distinct values and no query filters on it, so an index here would be write cost with no reader (A13). The check constraint is not optional: presence is not validity, and without it the database accepts any integer the application never wrote (A11).
 
 ### Courses
 | Column | Type | Notes |
@@ -202,7 +295,7 @@ Five tables: `Users`, `Courses`, `Items`, `RefreshTokens`, `AiUsageLogs`.
 | UserId | uuid | FK → Users (**Restrict**), indexed |
 | Title | varchar(200) | required |
 | Description | text | nullable |
-| IsDeleted | bool | soft delete |
+| IsDeleted | bool | soft delete — `DeletedAt` + `DeletedBatchId` is deferred (ADR-25, §12) |
 | CreatedAt / UpdatedAt | timestamptz | |
 
 Check constraint: `CK_Course_Title` — `"Title" ~ '\S'` (at least one non-whitespace character).
@@ -217,11 +310,11 @@ Check constraint: `CK_Course_Title` — `"Title" ~ '\S'` (at least one non-white
 | Depth | int | 0–4 |
 | Title | varchar(250) | required |
 | Content | text? | deliberately unbounded — it is the body |
-| IsDeleted | bool | soft delete |
-| Kind | int | TPH discriminator: 0 = Note, 1 = Task |
+| IsDeleted | bool | soft delete — `DeletedAt` + `DeletedBatchId` is deferred (ADR-25, §12) |
+| Kind | int | TPH discriminator: 0 = Note, 1 = Task. **Immutable** (rule 3.2.8) |
 | Status | int? | tasks only |
 | Priority | int? | tasks only |
-| DueDate | timestamptz? | tasks only |
+| DueDate | timestamptz? | tasks only; UTC only (§14.1) |
 | CreatedAt / UpdatedAt | timestamptz | |
 
 Check constraints:
@@ -250,6 +343,10 @@ Indexes: `(CourseId)`, `(ParentItemId)`, `(UserId, CourseId)`, and `(UserId, Due
 
 The hash must be **deterministic** (SHA-256), not BCrypt: every refresh looks the token up by hash, and a per-row salt would make that lookup impossible. SHA-256 is safe here because the token is high-entropy random, unlike a password.
 
+**The cascade never fires today.** Users are deactivated, never deleted. The delete behaviour is correct as an intent — a session belongs to nobody but its user — but nothing exercises it.
+
+**Concurrency token** (ADR-27): PostgreSQL's `xmin` system column, mapped as a shadow property. The migration creates nothing for it; a generated migration that adds an `xmin` column is wrong and must not be applied — read it first (`CODING_STANDARDS.md` §7).
+
 ### AiUsageLogs
 | Column | Type | Notes |
 |---|---|---|
@@ -260,6 +357,8 @@ The hash must be **deterministic** (SHA-256), not BCrypt: every refresh looks th
 | CreatedAt | timestamptz | **no `UpdatedAt`** — write-once |
 
 Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a composite already covers its leading column.
+
+This table is the only record of AI usage. A user's monthly usage is the sum of their rows since the start of the current month in Riyadh (ADR-39, ADR-40); no column elsewhere copies it.
 
 ### Delete behaviours
 `Restrict` everywhere except `RefreshTokens.UserId`, which cascades. Rationale: a session belongs to nobody but its user, while content must never disappear because of an accidental parent delete.
@@ -272,19 +371,55 @@ Index: `(UserId, CreatedAt)` composite. No standalone `UserId` index — a compo
 | Method | Route | Auth | Returns |
 |---|---|---|---|
 | POST | `/api/auth/register` | anonymous | 201 + userId |
+| POST | `/api/auth/login` | anonymous | 200 + token pair |
+| POST | `/api/auth/refresh` | anonymous¹ | 200 + new token pair |
+| POST | `/api/auth/logout` | user | 204, in every case (§9.3) |
+| GET | `/api/auth/me` | user | 200 + `CurrentUserDto`; 404 if the account row is gone |
 | POST | `/api/courses` | user | 201 + courseId |
+| GET | `/api/courses?page&pageSize` | user | 200 + `PagedResult<CourseDto>`, the caller's courses only; 400 for paging out of range (§14.2) |
+| GET | `/api/courses/{id}/tree` | user | 200 + flat list of `ItemDto` (ADR-23); 404, 403 (ADR-33) |
+| PUT | `/api/courses/{id}` | user | 204; 400, 404, 403 |
 | DELETE | `/api/courses/{id}` | user | 204 |
 | POST | `/api/notes` | user | 201 + noteId |
 | POST | `/api/tasks` | user | 201 + taskId |
+| PATCH | `/api/tasks/{id}/status` | user | 204; 400, 404 (also for a note's id), 403 |
+| PATCH | `/api/tasks/{id}/schedule` | user | 204; 400 (including a non-UTC `dueDate`, §14.1), 404 (also for a note's id), 403 |
+| GET | `/api/items?page&pageSize` | user | 200 + `PagedResult<ItemDto>` of standalone items (no parent, no course); 400 for paging out of range |
+| GET | `/api/items/{id}` | user | 200 + `ItemDto`; 404, 403 (ADR-33) |
+| GET | `/api/items/{id}/tree` | user | 200 + flat list of `ItemDto`, the item first (ADR-23); 404, 403 |
+| PATCH | `/api/items/{id}` | user | 204; 400, 404, 403. Never changes `Kind` (rule 3.2.8) |
 | DELETE | `/api/items/{id}` | user | 204 |
+| POST | `/api/notes/{id}/summarize` | user | 200 + `{ summary, tokensUsed }`; 403, 404, 429, 502. Empty body; nothing is stored (§15) |
+| POST | `/api/notes/{id}/extract-tasks` | user | 200 + `{ suggestions, tokensUsed }`; 403, 404, **409**, 429, 502. Empty body; nothing is created (ADR-28) |
+| GET | `/api/dashboard` | user | 200 + `DashboardDto` (§15.4); 404 if the account row is gone |
+| PATCH | `/api/admin/users/{id}/deactivate` | `users:deactivate` permission² | 204 |
 
-Deletion has one route for both notes and tasks, because the operation does not distinguish them.
+Deletion, reading and content edits have one route for both notes and tasks, because those operations do not distinguish them. Status and schedule live under `/api/tasks`, because only a task has them.
 
-### Planned — M6
-`POST /api/auth/login`, `POST /api/auth/refresh`, `POST /api/auth/logout`
+**Every update body replaces all of its fields.** A `null` `description`, `content` or `dueDate` clears the value. A missing `status` or `priority` is a 400, not a silent reset to `0`: those two are required, and their absence is refused rather than guessed (A24). The id always comes from the route; an `id` in the body is ignored.
 
-### Planned — M7
-`GET /api/courses`, `GET /api/courses/{id}/tree`, `GET /api/items/{id}`, `PATCH /api/items/{id}`, `PATCH /api/tasks/{id}/status`, `PUT /api/courses/{id}`
+**Enum values are numbers in JSON**, in both directions: `kind` (0 = note, 1 = task), `status`, `priority` and `role`. For a note, `status`, `priority` and `dueDate` are `null`.
+
+**"user" means any valid access token, and it is the default.** A fallback authorization policy requires an authenticated caller on every endpoint; only the three `anonymous` routes above, and the OpenAPI document, opt out with `[AllowAnonymous]` (§9).
+
+² UC-09. The first endpoint guarded by a permission rather than by ownership, and the proof that the whole authorization path works end to end: a normal user's token gets 403, an administrator's gets 204, and `psql` shows `IsActive = false`. Deactivating an already-inactive account is still 204 — `User.Deactivate` is tolerant of repetition, and an administrator should not have to check first. There is deliberately no *reactivate* and no *list users* endpoint yet (§12).
+
+¹ The refresh endpoint is anonymous by design: the access token it is meant to replace has usually already expired, so requiring it would make the endpoint useless exactly when it is needed. The refresh token in the body *is* the credential.
+
+**Login and refresh both return this shape** (ADR-20):
+
+```json
+{
+  "accessToken": "eyJhbGciOi...",
+  "refreshToken": "kO3n...Xq",
+  "tokenType": "Bearer",
+  "expiresIn": 900
+}
+```
+
+`expiresIn` is the access token's remaining lifetime in **seconds**, so the client never has to parse the JWT to schedule a refresh. No user profile fields are included (ADR-21); a client needing them calls `GET /api/auth/me`.
+
+**The two AI endpoints take an empty body**: the note is named by the route and its text is already stored. They are separate calls and separate charges, and a request never does both (ADR-38). 409 belongs to extraction alone — a summary creates nothing, so the depth guard does not apply to it (ADR-26). Approval of a suggestion uses the existing `POST /api/tasks`, with `parentItemId` set to the note.
 
 ### Error contract
 All errors return RFC 9457 `ProblemDetails`:
@@ -292,10 +427,22 @@ All errors return RFC 9457 `ProblemDetails`:
 | Exception | Status |
 |---|---|
 | `ValidationException` | 400 + `errors` grouped by field |
+| — (missing or invalid access token) | 401, from the authorization middleware, empty body |
+| — (valid token, permission missing) | 403, from the authorization middleware, empty body |
+| `InvalidCredentialsException` | 401 — login and refresh only: the credential itself was rejected |
 | `ForbiddenException` | 403 |
 | `NotFoundException` | 404 |
-| `ConflictException` | 409 |
+| `ConflictException` | 409 — duplicate email, parent at maximum depth, lost concurrency race |
+| `QuotaExceededException` | 429 — the month's AI budget is spent |
+| — (rate limit reached) | 429, from the rate-limiting middleware, with `Retry-After` |
+| `ExternalServiceException` | 502 |
 | anything else | 500, with no internal detail leaked |
+
+**401 has two sources, and only one of them is a handler.** The JWT middleware rejects a missing or invalid access token before MediatR runs, so that 401 has no exception type. The two anonymous authentication handlers — login and refresh — reject a presented credential (a password, a refresh token) by throwing `InvalidCredentialsException`. No other handler throws it: a handler behind `[Authorize]` that wants to reject on identity throws `ForbiddenException` and gets 403 — the caller was authenticated, just not entitled. **Cost**: one more exception type, which a careless handler could misuse for an authorization failure that should be 403.
+
+**429 has two sources, and they mean opposite things.** The rate limiter refuses a caller who asked too often: it answers `Too many requests.` with a `Retry-After` header saying when the window reopens, and the same request will succeed then (ADR-45). `QuotaExceededException` refuses a caller whose monthly AI budget is spent: `Your monthly AI token quota is exhausted.`, no `Retry-After`, and waiting a minute changes nothing. A client tells them apart by the header and the title, which is why the rate limiter does not reuse the quota's message.
+
+**400 is about shape; 403, 404 and 409 are about state.** A validator rejects a request that is malformed on its own terms — 400. A handler rejects a well-formed request that the current data refuses: the parent is missing (404), not yours (403), or full (409). A handler therefore never throws `ValidationException`.
 
 **Two different sources produce 400.** Model binding inside `[ApiController]` rejects malformed JSON *before* MediatR runs; its response carries a `traceId`. A `ValidationException` from a validator does not. Useful when diagnosing.
 
@@ -303,47 +450,112 @@ All errors return RFC 9457 `ProblemDetails`:
 
 ## 9. Security Model
 
-### ⚠ Current state — authentication is not implemented
+### Current state
 
-Identity comes from an `X-User-Id` request header read by a temporary `CurrentUserService`. **This is a complete authentication bypass**: anyone can name any user and become them. It exists solely so the content handlers could be built and tested before M6.
+Identity comes from the `sub` claim of an access token that `JwtBearer` has already validated; `CurrentUserService` reads that claim and nothing else. The `X-User-Id` header that stood in for authentication until M6 is gone.
 
-**This code must not be deployed or exposed on any network until M6 is complete.**
+**Every endpoint requires a valid access token unless it opts out.** A fallback authorization policy requires an authenticated user; `register`, `login`, `refresh`, and the OpenAPI document carry `[AllowAnonymous]`. Protection is the default and exposure is the declaration — a new controller that forgets an attribute is closed, not open. Without the fallback, an anonymous request reached the handler and failed there as a 403, and the 404-versus-403 difference told a stranger which ids exist. **Cost**: the 401 has an empty body rather than `ProblemDetails`, and an anonymous request to a route that does not exist gets 401 instead of 404.
 
-The design limits the blast radius of replacing it: the Application layer depends on `ICurrentUserService`, not on HTTP. When JWT arrives, only the API-layer implementation changes — not one line in Application.
+Replacing the header touched no line in Application: handlers still ask `ICurrentUserService`, and only its API-layer implementation changed.
 
-### Target state (M6)
-- Short-lived access token (JWT, HS256), signing key stored in **user secrets**, never in `appsettings.json`. HS256 requires a key of at least 32 bytes.
-- Long-lived refresh token: random, stored **hashed**, rotated on every use, with the old token revoked and linked via `ReplacedByTokenId`.
-- **Reuse detection**: presenting an already-revoked token indicates theft; the correct response is to revoke the user's entire token chain.
-- Login must not distinguish "no such user" from "wrong password" — same status, same message, and **the same response time** (call `Verify` against a dummy hash when no user is found, or timing alone leaks which emails are registered).
-- `IsActive` checked before any token is issued.
+### 9.1 Authentication decisions (new in v3.0)
 
-### Known accepted risks
-- **`ConflictException` on registration names the email.** A friendlier message in exchange for account enumeration. Accepted for a learning project; revisit before any public deployment.
+Three of these were open questions in v2.0; the other three were never written down. None of them can stay open — each blocks a specific file in M6 — so all six are decided here.
+
+| # | Decision | Value | Cost |
+|---|---|---|---|
+| 1 | Access token lifetime | **15 minutes** | A revoked user stays usable for up to 15 minutes |
+| 2 | Refresh token lifetime | **7 days**, renewed in full on every rotation | An active session never expires. An absolute session cap is deferred (§12) |
+| 3 | Concurrent sessions | **Unlimited; one chain per device** (ADR-19) | Reuse detection logs the user out of every device |
+| 4 | Refresh token transport | **Response body** (ADR-20) | Client-side storage is the client's problem |
+| 5 | JWT claims | **`sub`, `jti`, `role`**, plus registered claims only: `iss`, `aud`, `exp`, `iat`, `nbf` (ADR-21) | Name and email require a database read. A role change lags by up to 15 minutes, demotion included |
+| 6 | Logout scope | **The presented refresh token only** | No "sign out everywhere"; deferred (§12) |
+
+**The signing key** lives in `dotnet user-secrets`, never in `appsettings.json`. HS256 requires at least 32 bytes; a shorter key throws at *runtime*, not at build — so the key length is validated at startup.
+
+**Clock skew is set explicitly to 30 seconds**. `JwtBearer` tolerates five minutes by default, which silently stretches decision 1 from 15 minutes to 20.
+
+**A trap worth writing down before it happens.** `CurrentUserService` will read the user id from the `ClaimsPrincipal`. Whether it appears as `sub` or as `ClaimTypes.NameIdentifier` depends on which handler validated the token and whether inbound claim mapping was cleared. Both spellings compile, and the wrong one returns `null` at runtime, not an error. **Verify by enumerating the actual claims once and reading them** — this is verification rule 3 (§10) applied before the fact rather than after it.
+
+### 9.2 Login rules
+
+1. **One message for every failure.** "No such user" and "wrong password" return **401 with identical text**. Distinguishing them hands an attacker an account-enumeration tool.
+2. **Check `IsActive`** before issuing any token — and return the same 401 text, for the same reason.
+3. **Always call `Verify`**, even when no user was found, against a fixed dummy hash. Without it, response time separates the two cases and leaks exactly what rule 1 protects.
+4. **Never log the password**, not even on failure.
+
+### 9.3 Refresh rules
+
+Hash the incoming token → look it up → check `IsActive(utcNow)` → issue a new pair → `oldToken.Revoke(utcNow, newToken.Id)` → save. **One `SaveChangesAsync` is already one transaction in EF Core; no explicit transaction is needed and none should be added.**
+
+**Every refusal is 401 through `InvalidCredentialsException`, with one text** — an unknown token, an expired one, a revoked one, or a deactivated user. **Inactive has two causes, with two responses**: a token revoked by rotation triggers reuse detection (below); an expired one returns 401 and nothing else — expiry is not theft.
+
+**Refresh refuses a deactivated user.** Without this check, deactivation would never end a session: §9.4 accepts that an access token outlives a deactivation by up to 15 minutes, which is only true if the next refresh fails.
+
+**Two parallel refreshes with one token** (ADR-27). A transaction makes a save atomic; it does not stop two requests from reading the token as active before either writes. The concurrency token does: exactly one rotation succeeds, the other fails at save, and `UnitOfWork` translates `DbUpdateConcurrencyException` into `ConflictException` (409), the same way it already translates a unique violation. The losing client must use the pair the winning request received; presenting the old token again is a reuse, and is treated as one.
+
+**Reuse detection**: a token that is presented after being revoked **by rotation** — `ReplacedByTokenId` is set — means an old copy of a live chain is in someone else's hands: the chain was stolen. The response is to revoke every active token the user has, on every device. `ReplacedByTokenId` exists for exactly this. **The revocations are saved before the 401 is returned** — a handler that throws first discards them, and the stolen chain stays alive.
+
+**A token revoked without a successor is a plain 401, not a theft.** That is a token ended by logout, or by an earlier mass revocation. Its chain is already dead, so there is nothing left to steal from it. Treating it as theft would have two costs: anyone holding any old token could log the user out of every device, as often as they like, and a refresh still in flight when the user taps logout would sign that user out of their other devices. **Cost**: a stolen token whose owner has since logged out no longer raises the alarm — acceptable, because it can no longer open a session either.
+
+**Logout** revokes the presented refresh token only if it belongs to the caller (`sub`) and is still active, and returns 204 in every case — a foreign, unknown, or already-revoked token included, as RFC 7009 does for token revocation. Logout never runs reuse detection: a revoked token arriving there is a double tap, not a theft.
+
+### 9.4 Known accepted risks
+
+- **Registration reveals whether an email is already in use.** This is the one that undermines the others: §9.2 builds careful anti-enumeration into login, and `POST /api/auth/register` gives the same information away on an easier endpoint. Closing it properly requires an email-verification flow (always return 202, send a mail either way), which is out of scope. **Recorded here rather than fixed, so that login's protection is not mistaken for complete protection.** Rate limiting exists since M10 (ADR-45) and reduces how fast the list can be harvested, not whether it can be.
+- **An access token outlives a deactivation, a logout, or a role change** by up to its lifetime. This is the price of stateless auth (ADR-06). Checking the database on every request would remove the reason JWT was chosen. **Demotion is the worst case of the three**: a user who has just lost administrative rights keeps them until their access token expires.
+- **Rate limiting counts by client address, and an address can be shared.** The `auth` policy partitions by `RemoteIpAddress` (ADR-45), so callers behind one NAT, one proxy or one container network share a single budget of 10 requests a minute, and one of them can spend it for the others. The fix is forwarded headers, which are deferred with public exposure (§12): reading `X-Forwarded-For` without a trusted-proxy list is worse than not reading it, because the header is caller-supplied and turns one budget per address into one budget per *claimed* address. Limits are also per process, so a second instance would double them.
 - **Course ownership is guarded in one layer only** (see §6).
 - **Password length is unbounded.** Safe because `EnhancedHashPassword` pre-hashes the input, removing BCrypt's 72-byte truncation. Reverting to the standard variant would silently reintroduce it.
+- **The first administrator comes from configuration, and its password sits in `user-secrets` until someone removes it.** At startup, `AdminSeed:Email` names the account. If none exists, `AdminSeed:FullName` and `AdminSeed:Password` create it under the registration password policy, and `PromoteToAdmin` runs in the same save. An existing account is only promoted — its password is never overwritten, so stale configuration cannot reset a password its owner has since changed. The startup log asks for the password to be removed once it has served. Without `AdminSeed:Email` nothing runs, and startup does not touch the database. **Cost**: until it is removed, an administrator password lives in plain text on the machine — the same exposure as the JWT key and the connection string beside it. This replaced the direct `UPDATE` used before M6, which bypassed `PromoteToAdmin` and left `UpdatedAt` unstamped.
+- **An administrator can deactivate any account, their own and the last administrator's included.** Nothing stops it, and there is no reactivation (§12). Recovery is to name a different, active account in `AdminSeed:Email` and restart. A guard would need a count of active administrators on every call — a rule for a situation that has one operator today.
+
+### 9.5 Authorization model
+
+Two mechanisms, and they are not interchangeable:
+
+- **Ownership** guards what a user does with their own rows. The handler compares `UserId` against the caller and throws `ForbiddenException`. This exists already and does not change.
+- **Permission** guards what a role may do to *other people's* rows. An ASP.NET Core policy checks it on the endpoint, before the handler runs.
+
+The path of an authorized request: login issues the `role` claim → `[Authorize(Policy = ...)]` names a permission on the endpoint → the policy parses the claim back into `UserRole` and asks the same Domain map that the entity asks. **One map, two callers**, so the API layer keeps no list of its own that could drift. That is the reason the map lives in Domain and not in the API layer: a map in the API is invisible to Application, and a handler cannot ask a question it cannot see.
+
+**Policies are registered from the constants, not from a list.** At startup, one policy is added for every `const` in `Permissions`, named by the permission itself and found by reflection. Adding a capability therefore stays at the three edits ADR-31 promises — a constant, a line in the map, an attribute — with no fourth place to forget; and a forgotten policy would not fail safe, it would throw on the first request. The `role` claim is accepted by its exact enum name only: `Enum.TryParse` also accepts `"1"` and `"admin"`, which the token never carries.
+
+**A normal user holds no permission at all** — their rights over their own rows come from ownership, not from the role, so the `User` entry in the map is an empty set rather than an oversight. A role value the code does not recognize resolves to that same empty set instead of throwing: a row written by a future version must mean *no privilege*, never a crashed request. This is the `D4` shape — an unrecognized value out of storage is refused, not fatal.
+
+**Deliberately absent**: demotion, a second role per user, a per-user exception to a role, any way to edit permissions in a running system, and an audit trail of administrative actions. Each is costed in §12.
 
 ---
 
 ## 10. Testing Strategy
 
-**Why Domain and Application first**: both are free of any dependency on a database, a web server, or the network. The full suite runs in about two seconds with Docker stopped.
+**Why Domain and Application first**: both are free of any dependency on a database, a web server, or the network. The three unit suites run in about two seconds with Docker stopped; the integration suite added in M10 needs Docker and takes seconds rather than milliseconds, which is the price of executing real SQL.
 
 | Project | Scope |
 |---|---|
 | `StudyHub.Domain.Tests` | Entity factories, invariants, tree rules |
 | `StudyHub.Application.Tests` | Each handler in isolation, repositories mocked |
+| `StudyHub.Infrastructure.Tests` | Password hashing, token generation and hashing — no database |
+| `StudyHub.IntegrationTests` | The real API hosted in-process against a throwaway PostgreSQL container: SQL, the soft-delete filter, the statement budget, rate limiting, the quota and the token cleanup (ADR-44). **Needs Docker** |
 
 **Naming**: `MethodName_Scenario_ExpectedResult`. **Structure**: Arrange–Act–Assert, separated by blank lines. **Mocking**: only interfaces declared in Application; never the entity under test.
 
 **Definition of done**: every new handler ships with at least one success test and one failure test.
 
-**Not automated yet**: EF Core queries and HTTP round-trips need integration testing against a containerized database. Scheduled for M10. Until then, manual verification through `StudyHub.API.http` and direct `psql` inspection is the substitute — and `psql` is the stronger of the two, because it is the only view that does not pass through EF's soft-delete filter.
+**Extended in v3.0**: every validator containing a **conditional or cross-field rule** ships with a test. Plain `NotEmpty` and `MaximumLength` do not need one. The rule that a nested item may not carry any `CourseId` currently lives in the validator alone — the entity ignores the value silently rather than rejecting it — so deleting that rule would break the API without turning a single test red.
+
+**Assert on what did not happen too.** A failure test verifies that the exception was thrown *and* that `SaveChangesAsync` was never called.
+
+**A concurrency rule needs a concurrent proof.** A sequential test passes whether or not the concurrency token exists. Since M10 the proof is automated: `Refresh_TwoParallelRequestsWithOneToken_ShouldNeverBothSucceed` fires two simultaneous refreshes with one token, ten rounds running, and requires exactly one 200 in every round — the other being 409 (the lost `xmin` race) or 401 (it arrived after the rotation and was read as reuse). Reading the `xmin` condition in the logged `UPDATE` remains a useful check, but it is no longer the only one.
+
+**Automated since M10**: EF Core queries and HTTP round-trips are covered by `StudyHub.IntegrationTests`, which hosts the real API against a throwaway PostgreSQL container (ADR-44). What the unit suites still cannot see, and the integration suite now can, is the SQL itself: the soft-delete filter, the dashboard's three-statement budget, the month boundary of the quota, and two parallel requests racing one row. Manual verification through `StudyHub.API.http` and direct `psql` inspection stays useful for a milestone's own end-to-end run — and `psql` is still the only view that does not pass through EF's soft-delete filter.
 
 ### Three verification rules learned the hard way
 1. **A successful build proves nothing.** Every change is verified by its own specific effect: an HTTP status code, a row in the database, a passing test.
 2. **A constraint is proven by trying to break it *and* by inserting a row that should pass.** One without the other is half an answer. And read *which* constraint the error names — a malformed statement produces a red error and no inserted row, which is exactly what a working constraint produces.
 3. **A change with no externally observable behaviour is verified by reading the file.** When no code path calls the changed method yet, the build passes, the tests pass, and the endpoints behave identically whether or not the change was ever applied. Nothing else will catch it.
+
+> **A corollary added in v3.0.** Rule 3 is a last resort, not a first choice. Before accepting "read the file" as the proof, ask whether the change could be given observable behaviour *today* by a unit test. Two proofs in the M6 checklist — that a corrupt stored hash returns `false` instead of throwing (`D4`), and that two passwords sharing 72 bytes do not verify each other (`D5`) — were deferred to a milestone they never depended on, because a proof was assumed to mean an HTTP status code. Both are unit tests over `IPasswordHasher` and need no endpoint, no database, and no login flow; they were moved to M5.1 and are green. The HTTP checks stay in M6 as end-to-end confirmation that login turns a `false` into 401 — they are simply no longer the only proof.
 
 ---
 
@@ -356,13 +568,19 @@ The design limits the blast radius of replacing it: the Application layer depend
 | M3 | Domain entities, DbContext, relational integrity | ✅ |
 | M4 | Application foundation: MediatR, FluentValidation, `ValidationBehavior`, test projects | ✅ |
 | **M5** | **Hardening & the content tree**: global exception handling, domain and security fixes, `Email` value object, base-class split, clean schema with six check constraints, the `Items` TPH restructure, create/delete handlers, controllers | ✅ |
-| **M6** | **Authentication (UC-01, UC-02)**: login, JWT issuance, refresh rotation, removal of the `X-User-Id` bypass | ⏳ Next |
-| M7 | Content completion (UC-03, UC-04, UC-05): read queries, DTOs, update handlers, quota to configuration | Pending |
-| M8 | AI integration & quota enforcement (UC-06, UC-07) | Pending |
-| M9 | Dashboard aggregation (UC-08) | Pending |
-| M10 | Integration tests, rate limiting, API containerization | Pending |
+| **M5.1** | **Cleanup**: exception file split, `Infrastructure.Tests` with the `D4` and `D5` proofs, `Email.FromPersisted`, UTC rule, depth refused with 409 (ADR-30) | ✅ |
+| **M5.2** | **Role foundation (UC-09, ADR-31)**: `UserRole`, the permission map in Domain, the `Role` column with its check constraint, `PromoteToAdmin` and `Can`. No endpoint, no policy, no claim — those need authentication to mean anything | ✅ |
+| **M6** | **Authentication & authorization (UC-01, UC-02, UC-09)**: login, JWT issuance with the `role` claim (ADR-29), refresh rotation with a concurrency token (ADR-27), reuse detection, removal of the `X-User-Id` bypass, permission policies, the first administrator endpoint, and seeding the first administrator account | ✅ |
+| M7 | Content completion (UC-03, UC-04, UC-05): DTOs, read queries, update handlers, pagination | ✅ |
+| M8 | AI integration & quota enforcement (UC-06, UC-07): the summarize and extract-tasks endpoints behind one `IAiService` with a fake provider (ADR-35, ADR-38), user approval (ADR-28), the `ConsumeTokens` split into `HasQuotaFor` plus the atomic record (ADR-36, ADR-37 — the record was replaced in M8.1, ADR-39), failure model, extraction depth guard, quota to configuration | ✅ |
+| M8.1 | **Quota from the log**: monthly usage summed from AiUsageLogs instead of a stored counter (ADR-39), business periods in Asia/Riyadh (ADR-40) | ✅ |
+| M9 | Dashboard aggregation (UC-08) as defined in §15.4 | ✅ |
+| M10 | **Readiness**: integration tests against a real PostgreSQL (ADR-44), rate limiting (ADR-45), refresh-token cleanup (ADR-46), API containerization (ADR-47) | ✅ |
+| M10.1 | A demo page served by the API (ADR-48); the parallel-refresh test reports which defence it exercised | ✅ |
 
-> **Renumbering note.** v1.1 listed M5 as authentication and M6 as content management. What was actually built in that slot was hardening plus the content tree. The roadmap has been rewritten to match what happened rather than what was planned — which also keeps every `(M5)` tag in the troubleshooting log accurate.
+**The roadmap is complete.** No milestone is scheduled after M10.1; what could come next is listed in §12, each item with its cost.
+
+> **Renumbering note.** v1.1 listed M5 as authentication and M6 as content management. What was actually built in that slot was hardening plus the content tree. The roadmap has been rewritten to match what happened rather than what was planned — which also keeps every `(M5)` tag in the troubleshooting log accurate. M5.1 is numbered as a point release for the same reason: it is cleanup of M5's output, not a milestone of its own, and giving it a whole number would shift every tag after it. **M5.2 is a decimal for the same reason and one more**: it is a schema and domain change only, kept out of M6 so that a migration is not mixed into the heaviest security milestone. A migration is easier to read, and easier to roll back, on its own.
 
 ---
 
@@ -373,23 +591,243 @@ Each of these is a decision, not an oversight.
 | Item | Why deferred | What it will cost later |
 |---|---|---|
 | **Node moving** | No use case requires it; it is the single largest source of complexity in a free-nesting tree | Cycle detection, subtree depth recalculation, `CourseId` rewrite down every descendant. Invalidates ADR-09 and ADR-10 |
-| **Unarchive / restore** | Not requested | **Cannot be done correctly as designed.** After a cascade delete, nothing distinguishes a child you deleted last month from one deleted by cascade yesterday. Fixing it means `DeletedAt` (or a delete-batch id) instead of `IsDeleted` — cheap now, expensive once real data exists |
+| **Restore after delete** | Not requested. The schema change that makes it *possible* (ADR-25) is deferred too: the project is not deployed, so no real data will make it expensive later | Currently impossible: after a cascade delete nothing distinguishes a child deleted deliberately from one deleted by cascade. ADR-25 fixes the schema; the restore handler comes after it |
+| **Absolute session lifetime cap** | Rotation with reuse detection already limits the damage of a stolen token | A `SessionStartedAt` column or a walk back up the `ReplacedByTokenId` chain, plus a forced re-login the user did not ask for |
+| **"Sign out of all devices"** | Logout is per-device (§9.1); the all-device revocation path is built anyway, for reuse detection (M6) | A query for the user's active tokens — deliberately left out of `IRefreshTokenRepository` until something needs it — plus an endpoint |
+| **Changing an item's `Kind`** | An object cannot change its CLR type, which is what the discriminator follows (rule 3.2.8) | Create-new-and-delete-old semantics, a new id, and the children: today they are deleted with the old item, because moving them is forbidden (rule 7) |
+| **Cursor pagination** | Offset is adequate at per-user scale (ADR-22) | A stable sort key, an opaque cursor format, and the loss of "jump to page 7" |
+| **Grace window for rotation** | Rotation is strict: one save wins (ADR-27). A window exists to absorb lost responses on unstable networks, and there is no real client yet | A few seconds during which a just-revoked token still issues a new pair. Reuse detection must then tolerate a branching chain, and a stolen token works inside the window |
+| **Concurrency control on content edits** | One user editing their own data; two tabs at most | Last write wins silently today. The fix is an `ETag` / `If-Match` contract on every update endpoint |
 | **Many-to-many between tasks and notes** | Parenthood covers the known cases | A join table and a second relationship model |
-| **Integration tests** | Domain and Application carry the business logic | A containerized test database and a slower suite |
-| **API containerization** | `dotnet run` is sufficient locally | A Dockerfile and compose changes |
-| **Rate limiting** | No public exposure yet | Middleware plus a policy per endpoint group |
+| **Forwarded headers behind a proxy** | Nothing is deployed behind a proxy yet, and `X-Forwarded-For` is caller-supplied: reading it without a list of trusted proxies lets any caller claim a fresh rate-limit budget per request (M10, ADR-45) | `UseForwardedHeaders` with `KnownProxies` or `KnownNetworks` filled in per environment, and a decision about what to trust in the container network. Until then, callers sharing an address share one `auth` budget (§9.4) |
+| **Email verification on registration** | Out of scope for a learning project | The only complete fix for account enumeration: always return 202, and send a different mail depending on whether the address was already registered |
+| **Demotion from administrator** | No use case asks for it, and one entry point to privilege with no exit is the easiest shape to audit | A `Demote` method, its tests, and an endpoint. Cheap — it is withheld because it is unneeded, not because it is hard |
+| **More than one role per user** | Two roles that do not overlap are fully described by one column | The column becomes a join table, every permission check becomes a union over roles, and ADR-31's main saving disappears |
+| **A permission granted to one user, outside their role** | It would break "permissions live in code": the exception would have to live in the database | A `UserPermissions` table, and a permission check that reads it on every request |
+| **Editing permissions at runtime** | The shortest path to a silent privilege escalation (ADR-31) | Not planned to return |
+| **An audit trail of administrative actions** | There is exactly one administrative action, and it leaves its own trace: `IsActive = false` with a stamped `UpdatedAt` | A table, an interceptor or an explicit write per action, and a retention rule. Add it with the first *destructive* administrative action, not before |
+| **Listing users for an administrator** | UC-09 needs a user id, and `psql` supplies it. An endpoint built before its consumer is the A16 pattern | A read query, a DTO, pagination, a `users:view` permission, and the decision of which fields an administrator may see |
+| **Reactivating a deactivated account** | UC-09 asks only to stop an account; `User` has no `Activate` | A domain method, its tests, a second permission, and an endpoint. Until then a mistaken deactivation is undone with a direct `UPDATE` |
 | **`Content` length limit** | It is the note body; an arbitrary cap would be guesswork | A migration if a limit is ever chosen |
+| **A paginated "all my tasks" endpoint** | The dashboard lists only urgent tasks by design (§15.4), and the demo page (ADR-48) builds its Tasks tab from every course tree instead — one request per course. Acceptable while the only client is a demo | A read-side query and endpoint, `GET /api/tasks` with a status filter and pagination (§14.2), in one statement; the page's Tasks tab then makes one request instead of one per course |
 
 ---
 
 ## 13. Open Questions
 
-Most of v1.1's open questions are now closed: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate** — `IUserRepository`, `ICourseRepository`, `IItemRepository` — with `Item` covering both notes and tasks since they share a table and a lifecycle.
+Closed since v2.0: API style is **Controllers** (ADR-14); DTO mapping is **manual extension methods** (ADR-17); repository granularity is **one per aggregate**. The authentication questions are answered in §9.1; the registration message is an accepted risk (§9.4); `DeletedAt` is deferred (ADR-25); pagination, tree shape, and concurrency are settled in §14; the approval flow and quota ordering in §15. Three M7 questions are closed as well: item counts on `GET /api/courses` (question 3, ADR-34), where a read query projects (question 4, ADR-32), and reading another user's resource (question 7, ADR-33). Three M8 questions are closed too: the provider and its abstraction (question 1, ADR-35), the estimated cost per operation (question 2, ADR-36), and how the token counter survives concurrent operations (question 5, ADR-37). The M9 question is closed too: what "recent courses" means (question 6, ADR-41).
 
-Still open:
+Four M10 questions were opened and closed before M10 began: how integration tests get a database (question 8, ADR-44), the rate limits (question 9, ADR-45), how long refresh tokens are kept (question 10, ADR-46), and how the API container gets its secrets (question 11, ADR-47). No question is open. A new question takes the next unused number, 12: numbers are never reused, because other text refers to them by number.
 
-1. **Access token lifetime** — 15 minutes is the common default. Shorter means more refresh traffic; longer means a stolen token stays useful longer.
-2. **Refresh token lifetime and concurrent session policy** — is one active token per user enough, or should multiple devices each hold their own?
-3. **Should the registration conflict message stop naming the email?** (§9)
-4. **`DeletedAt` instead of `IsDeleted`** — worth doing pre-emptively, before restore is ever requested? (§12)
-5. **AI provider abstraction** — is `IAiService` enough, or should the prompt/response contract be modelled explicitly before M8?
+---
+
+## 14. Cross-Cutting Rules
+
+These belong to no single milestone. That is precisely why they were missing from v2.0 — a rule with no obvious home does not get written, and then gets rediscovered as a bug in every milestone separately.
+
+### 14.1 Time
+
+**Every timestamp crossing the API boundary is UTC, in ISO 8601, ending in `Z`.**
+
+```
+2026-10-01T14:00:00Z      ✅ accepted
+2026-10-01T14:00:00+03:00 ❌ 400
+2026-10-01T14:00:00       ❌ 400
+```
+
+**Why this is not pedantry.** `DueDate` maps to a `timestamptz` column, and Npgsql writes only a `DateTime` whose `Kind` is `Utc`. A JSON value without an offset parses to `Unspecified`; a value with a non-`Z` offset parses to `Local`, because the JSON reader converts it to server time. Npgsql refuses both. So the choice is not between strict and lenient — it is between a 400 that explains itself and a 500 that does not. This is a live defect today, in both formats: no request in `StudyHub.API.http` has ever sent a `dueDate`, which is the only reason it has not been hit.
+
+**Rules:**
+- Validators reject any `DateTime` whose `Kind` is not `Utc` — every validator that carries one, M7's schedule update included.
+- Entities read `DateTime.UtcNow` and never `DateTime.Now`.
+- A due date in the past is **valid**. Recording a task that was due yesterday is a normal thing to do.
+- Timezone presentation is the client's job. The API neither stores nor asks for the user's timezone; it uses one configured business time zone for periods (ADR-40).
+- Business periods — the quota month, and from M9 the dashboard's days — start at midnight in the configured business time zone, Asia/Riyadh (ADR-40). Storage and transport stay UTC.
+
+**Cost, stated plainly**: a client sending an unambiguous `+03:00` offset gets rejected even though the value could have been converted. Accepting it would route the value through the *server's* local timezone and back — correct, but invisible and hard to verify. One rejected format is cheaper than one invisible conversion.
+
+### 14.2 Pagination
+
+Every endpoint returning a **collection** paginates. Every endpoint returning a **tree** does not.
+
+| Parameter | Default | Maximum |
+|---|---|---|
+| `page` | 1 | — |
+| `pageSize` | 20 | 100 |
+
+The response wraps the items:
+
+```json
+{
+  "items": [],
+  "page": 1,
+  "pageSize": 20,
+  "totalCount": 137
+}
+```
+
+**Why a tree is exempt.** Splitting a subtree across pages returns children whose parents are on another page — the client cannot assemble anything from that. So a subtree is returned whole. It is bounded in depth — five levels — but not in breadth, which is the risk below.
+
+**The risk that comes with the exemption**: a course containing tens of thousands of items produces one very large response. No cap exists today. If it becomes real, the answer is a documented limit and a 400, not silent truncation — a truncated tree is indistinguishable from a complete one.
+
+### 14.3 Logging
+
+**Never logged, under any circumstance:** passwords (plain or hashed), raw refresh tokens, refresh token hashes, JWT signing keys, connection strings.
+
+**Log the user id, not the email.** The id identifies the account for debugging without putting an address in a log file that outlives its usefulness.
+
+**Expected exceptions log at Warning with the type name only. Unexpected ones log at Error with the full exception.** A 404 is not an incident; a 500 is. Logging them at the same level means neither can be found.
+
+### 14.4 Concurrency
+
+**A read-modify-write on a row that parallel requests can reach needs a concurrency check.** EF Core sends only the columns it changed, but computes their values from what it loaded — so without a check, the second of two parallel saves silently overwrites the first. One `SaveChangesAsync` is one transaction, which makes each save atomic — it does not stop two requests from reading the same row before either writes.
+
+| Row | The race | Decision |
+|---|---|---|
+| A refresh token during rotation (M6) | two refreshes with one token fork the chain | `xmin` concurrency token; the loser gets 409 (ADR-27). Proven concurrently since M10 (§10) |
+| Monthly AI usage | two AI operations record at once | none needed: each inserts its own `AiUsageLogs` row, and inserts neither lose nor collide (ADR-39) |
+| Courses and items | two tabs edit the same row | last write wins; deferred (§12) |
+
+**Choosing the loser's fate.** A conflict the client can resolve becomes a 409. A conflict on the record of something already paid for is resolved on the server and never surfaced.
+
+---
+
+## 15. AI Integration Model
+
+`UC-06` and `UC-07` are two sentences, and behind them is the milestone most likely to break — because the ordering problem below is not visible from the use case text at all.
+
+**Two operations, two endpoints, one paid call each** *(M8, ADR-28, ADR-38)*. On a note they already saved, the user chooses either a summary or task suggestions. A request never does both, and neither of them stores its result.
+
+**The shared order.** Both endpoints run the same steps, and only step 2 differs:
+
+```
+POST /api/notes/{id}/summarize        POST /api/notes/{id}/extract-tasks
+  1. load the note                      → 404 (missing, or not a note) / 403
+  2. —                                   note.IsAtMaxDepth  → 409   (§15.2)
+  3. sum the month's usage from AiUsageLogs (ADR-39)
+  4. user.HasQuotaFor(used, estimate) is false              → 429   (§15.1)
+  5. call the provider; it fails                            → 502   (§15.3)
+  6. insert the AiUsageLog row                                     (§15.1)
+  7. return the result; nothing else is written
+```
+
+**Step 2 belongs to extraction alone.** The depth guard exists because an approved task becomes a child of its source note (§15.2); summarizing creates nothing, so a note at maximum depth is summarized normally.
+
+**The summary is returned, never stored.** Keeping it is the client's choice: it writes the text back onto the note with `PATCH /api/items/{id}`, or saves it as a new note with `POST /api/notes`. The API stores no summary of its own, so a client that discards one pays again to get it back.
+
+**Suggestions are returned, never created** (ADR-28). For each suggestion the user approves:
+
+```
+POST /api/tasks  { "title": "…", "parentItemId": "<note id>" }
+```
+
+The two operations are told apart in the record by `AiUsageLog.OperationType`.
+
+A suggestion carries a title and optional content, and no due date: "by Friday" cannot become a UTC moment without the user's timezone, which the API neither stores nor asks for (§14.1). The user sets the date while approving.
+
+### 15.1 Quota ordering — the problem and the decision
+
+Before M8, `User.ConsumeTokens` threw when the quota would be exceeded, and the natural sequence was:
+
+```
+call the provider → pay → count tokens → ConsumeTokens → throws → result discarded
+```
+
+The money is spent and the result is thrown away by an accounting rule. **The check has to happen before the call, not after it.**
+
+**Decision (ADR-24)** — three steps, in this order:
+
+1. **Before the call**: sum the user's `AiUsageLogs` rows since the start of the month in Riyadh (ADR-39, ADR-40), and ask `user.HasQuotaFor(used, estimate)`. If false, throw `QuotaExceededException` → 429. Nothing external is invoked.
+2. **The call.**
+3. **After the call**: insert one `AiUsageLog` row with the tokens the provider reported. The record **never throws**, even if the actual cost exceeds what remained.
+
+`User.HasQuotaFor` in Domain is the rule; the log row is the record. The split is the point: a *question* about quota and a *record* of spending are different operations, and merging them is what created the trap. An insert cannot lose an increment or collide with a parallel one, so the record needs no transaction, no concurrency token and no retry (§14.4).
+
+**Cost accepted**: monthly usage may overshoot the quota by the gap between estimate and actual — once per request that passes the pre-check, and parallel requests all pass it before any of them records. The next check sums the real figure and refuses. A hard cap that could discard paid work is worse than a soft cap that cannot.
+
+**There is no reset.** A new month simply sums rows the previous month did not have.
+
+### 15.2 Depth and extraction
+
+Extracted tasks are children of their source note (`UC-06`). A child of a depth-4 note would be depth 5, which `Item.Initialize` rejects and `CK_Item_Depth` rejects again.
+
+**Decision (ADR-26)**: refuse the extraction **before calling the provider** when `note.IsAtMaxDepth` is true. Return 409 with a message naming the reason — the same status and the same domain query as creating any child under a full parent (ADR-30). Under the approval flow, this also spares the user from paying for suggestions that could never be approved.
+
+The alternative — creating the tasks as siblings instead of children — was rejected: it breaks provenance silently, and provenance-as-parenthood is the entire justification for `UC-06`'s shape. A refusal the user can read beats a result they cannot trust.
+
+### 15.3 Failure model
+
+Nothing originating outside the process reaches the client as a 500.
+
+| Failure | Exception | Status |
+|---|---|---|
+| Quota insufficient before the call | `QuotaExceededException` | 429 |
+| Provider unreachable, timed out, or returned an error | `ExternalServiceException` | 502 |
+| Provider returned a response that could not be parsed | `ExternalServiceException` | 502 |
+| Source note at maximum depth | `ConflictException` | 409 |
+
+**A billed call is recorded even when its result is unusable.** A response that arrived but could not be parsed has still been paid for: its usage is recorded and saved first, and only then does the client get the 502. A call that produced no response has no token count to record; that loss is accepted.
+
+**A reasoning model can be billed for an answer it never gave.** It spends part of the output budget thinking, so a budget sized for the answer alone is consumed before the answer starts: the provider then returns `finishReason: MAX_TOKENS` with no answer parts, and charges for the thinking. That is the "arrived but unusable" row above — the usage is recorded and the client gets 502. The same model returns its thinking as extra response parts, which are skipped rather than returned as the summary. How much it may think is configuration passed straight to the provider (`Ai:ThinkingBudget`, `Ai:ThinkingLevel`), never a value this code invents, because a model that does not know the field refuses the whole request.
+
+**No automatic retry.** A retry on a call that has already been billed doubles the cost to fix a failure that may not be transient. If a retry policy is ever added, it applies only to failures that are provably pre-billing — a connection refused, not a timeout after the request was accepted.
+
+**A timeout is configured explicitly.** The default `HttpClient` timeout is 100 seconds, which is not a decision, only an absence of one.
+
+**Both exceptions are Application-layer types.** The provider's own exception types stay inside Infrastructure, for the same reason `PostgresException` does (`CODING_STANDARDS.md` §1).
+
+### 15.4 Dashboard definition (UC-08)
+
+"Statistics, active courses, urgent tasks" cannot be finished, only extended. This is what `GET /api/dashboard` returns, for the caller only:
+
+**Counts**
+- Courses not deleted
+- Items by kind (notes, tasks)
+- Tasks by status (Pending, InProgress, Completed). Every task has exactly one of the three, so they add up to the task total
+- Tasks overdue: `Status != Completed AND DueDate < utcNow`
+
+**Urgent tasks** — at most **10**, ordered by `DueDate` ascending, then by id:
+
+```
+Status != Completed
+AND DueDate IS NOT NULL
+AND DueDate < start of today in Riyadh + 4 days
+```
+
+Overdue tasks are included, because a task that is already late is more urgent than one due tomorrow, not less. Each entry says whether it is overdue.
+
+**"Within 3 days" counts Riyadh calendar days** (ADR-40): today and the three days after it, up to midnight in Riyadh. On the 18th, a task due at 23:30 on the 21st is urgent, exactly like one due at 08:00 on the 21st. Overdue is an instant, not a day: `DueDate < utcNow`.
+
+**Recent courses** — at most **5**, ordered by latest activity descending, then by id (ADR-41). A course's latest activity is the later of its own last change — `UpdatedAt`, or `CreatedAt` if it was never edited — and the newest `UpdatedAt ?? CreatedAt` among its non-deleted items, at any depth. Adding, editing or ticking anything under a course moves it up; deleting an item is not activity.
+
+**Never order by a nullable timestamp directly.** PostgreSQL puts `NULL` first in a descending order, so a course that was never edited would jump to the top. Every ordering above is on a value that cannot be null.
+
+**One instant per response.** The handler reads the clock once. The overdue count, each `isOverdue` flag and the urgent window all come from that instant, which the response returns as `generatedAt`.
+
+**The two lists are capped previews, not collections.** §14.2 paginates collections a client pages through; these lists are fixed-size summaries and are never paginated.
+
+**The response** (ADR-43):
+
+```json
+{
+  "generatedAt": "2026-09-25T09:00:00Z",
+  "counts": {
+    "courses": 3, "notes": 12, "tasks": 9,
+    "pendingTasks": 4, "inProgressTasks": 2, "completedTasks": 3,
+    "overdueTasks": 1
+  },
+  "urgentTasks": [
+    { "id": "…", "title": "Finish lab 3", "courseId": "…", "status": 0,
+      "priority": 2, "dueDate": "2026-09-24T18:00:00Z", "isOverdue": true }
+  ],
+  "recentCourses": [
+    { "id": "…", "title": "Databases", "lastActivityAt": "2026-09-25T08:40:00Z" }
+  ]
+}
+```
+
+**404** when no account row exists for the token's user, the same as `GET /api/auth/me`: a dashboard of zeros for an account that does not exist would be a false answer.
+
+**The N+1 requirement is verified, not asserted.** The endpoint issues exactly three SQL statements — every count in one row, the urgent tasks, the recent courses (ADR-42) — whatever the amount of data. The proof is counting them in the EF Core SQL log for one request with a few items and again with hundreds: the two numbers must be equal. "It looked fast" is not the proof.
+
+

@@ -1,7 +1,12 @@
 ﻿using FluentValidation;
+using StudyHub.Application.Common.Validation;
 
 namespace StudyHub.Application.Users.Commands.RegisterUser;
 
+/// <summary>
+/// Validates <see cref="RegisterUserCommand"/>, including the password policy shared with
+/// administrator seeding.
+/// </summary>
 public class RegisterUserCommandValidator : AbstractValidator<RegisterUserCommand>
 {
     public RegisterUserCommandValidator()
@@ -13,11 +18,7 @@ public class RegisterUserCommandValidator : AbstractValidator<RegisterUserComman
             .EmailAddress().WithMessage("A valid email address is required.")
             .MaximumLength(150);
 
-        RuleFor(x => x.Password)
-            .NotEmpty()
-            .MinimumLength(8).WithMessage("Password must be at least 8 characters.")
-            .Matches("[A-Z]").WithMessage("Password must contain an uppercase letter.")
-            .Matches("[0-9]").WithMessage("Password must contain a digit.");
+        RuleFor(x => x.Password).StrongPassword();
 
         RuleFor(x => x.ConfirmPassword)
             .Equal(x => x.Password).WithMessage("Passwords do not match.");
