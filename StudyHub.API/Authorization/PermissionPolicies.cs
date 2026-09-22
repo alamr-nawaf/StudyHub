@@ -4,11 +4,15 @@ using StudyHub.Domain.Authorization;
 
 namespace StudyHub.API.Authorization;
 
+/// <summary>
+/// Registers one policy per constant in Permissions, named after the permission itself.
+/// </summary>
 public static class PermissionPolicies
 {
-    // سياسة لكل ثابت في Permissions، باسم الصلاحية نفسه. بالانعكاس لا بقائمة:
-    // إضافة قدرة تبقى ثابتًا وسطرًا في الخريطة وسمة على الـ endpoint (ADR-31) — لا موضع رابع يُنسى،
-    // وسياسة غير مسجّلة لا تفشل بأمان بل ترمي 500 عند أول طلب
+    // By reflection rather than from a list: adding a capability then stays a constant, a line
+    // in the map and an attribute on the endpoint (ADR-31) — there is no fourth place to
+    // forget. And an unregistered policy does not fail safely: it throws a 500 on the first
+    // request that asks for it
     public static void AddPermissionPolicies(this AuthorizationOptions options)
     {
         var permissions = typeof(Permissions)

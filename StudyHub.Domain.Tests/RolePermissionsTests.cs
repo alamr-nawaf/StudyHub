@@ -4,8 +4,9 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Domain.Tests;
 
-// الخريطة ترجع فارغًا لدور لا تعرفه — صحيح وقت التشغيل، وخطر وقت الكتابة:
-// دور ثالث يُضاف بلا مدخل يصير "بلا صلاحيات" بصمت. هذا الاختبار يجعله ضجيجًا
+// The map returns an empty set for a role it does not know: correct at run time, dangerous at
+// writing time, because a third role added without an entry would silently mean "no
+// permissions". This test turns that silence into noise
 public class RolePermissionsTests
 {
     [Fact]

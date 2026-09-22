@@ -11,8 +11,9 @@ using StudyHub.Application.DependencyInjection;
 
 namespace StudyHub.Application.Tests.Common.Behaviors;
 
-// عبر الحاوية الحقيقية لا باستدعاء المعالِج مباشرة: الحاوية تتخطّى بصمت أي سلوك
-// لا يطابق قيده العام، فاختبار المعالِج وحده يبقى أخضر والمدقّق لا يعمل أبدًا
+// Through the real container rather than by calling the behaviour directly: the container
+// silently skips any behaviour whose generic constraint does not match, so a test that calls
+// the handler alone stays green while the validator never runs at all
 public class ValidationBehaviorTests
 {
     [Fact]

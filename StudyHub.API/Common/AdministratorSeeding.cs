@@ -3,12 +3,16 @@ using StudyHub.Application.Users.Commands.SeedAdministrator;
 
 namespace StudyHub.API.Common;
 
+/// <summary>
+/// Creates or promotes the first administrator at startup, from the AdminSeed configuration.
+/// </summary>
 public static class AdministratorSeeding
 {
     private const string SectionName = "AdminSeed";
 
-    // القسم في user-secrets لا appsettings: فيه كلمة مرور حقيقية (CODING_STANDARDS §11).
-    // بلا AdminSeed:Email لا يحدث شيء، فالتشغيل المحلي العادي لا يحتاج قاعدة بيانات عند الإقلاع
+    // The section lives in user secrets, not in appsettings: it holds a real password
+    // (CODING_STANDARDS §11). Without AdminSeed:Email nothing happens at all, so an ordinary
+    // local run does not need a database at startup
     public static async Task SeedAdministratorAsync(this WebApplication app)
     {
         var section = app.Configuration.GetSection(SectionName);
@@ -22,10 +26,11 @@ public static class AdministratorSeeding
         using var scope = app.Services.CreateScope();
         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
 
-        // يمرّ بالمدقّق: إعدادات مشوّهة توقف الإقلاع بـ ValidationException بدل مسؤول بكلمة مرور ضعيفة
+        // It goes through the validator: malformed configuration stops startup with a
+        // ValidationException instead of creating an administrator with a weak password
         var result = await mediator.Send(new SeedAdministratorCommand(email, section["FullName"], password));
 
-        // المعرّف لا الإيميل في السجل (§14.3)
+        // The id, never the e-mail, in the log (§14.3)
         if (result.Created)
             app.Logger.LogInformation("Administrator {UserId} created from configuration.", result.UserId);
         else

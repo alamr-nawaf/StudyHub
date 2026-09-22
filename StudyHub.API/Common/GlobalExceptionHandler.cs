@@ -23,7 +23,8 @@ namespace StudyHub.API.Common
             Exception exception,
             CancellationToken cancellationToken)
         {
-            // العميل قطع الاتصال: لا أحد سيقرأ الرد، وليس عطلًا يستحق سجل خطأ كامل
+            // The client hung up: nobody will read the response, and this is not a fault that
+            // deserves a full error log
             if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
             {
                 _logger.LogInformation("Request aborted by the client.");
@@ -31,7 +32,7 @@ namespace StudyHub.API.Common
                 return true;
             }
 
-            // ترجمة نوع الاستثناء إلى رمز HTTP
+            // The exception type decides the status code
             var (statusCode, title) = exception switch
             {
                 ValidationException => (StatusCodes.Status400BadRequest, "Validation failed"),
@@ -46,7 +47,7 @@ namespace StudyHub.API.Common
                 _ => (StatusCodes.Status500InternalServerError, "Server error")
             };
 
-            // المتوقَّع يُسجَّل تحذيرًا، وغير المتوقَّع خطأً كاملًا
+            // Expected failures are warnings; unexpected ones are errors with the full stack
             if (statusCode == StatusCodes.Status500InternalServerError)
                 _logger.LogError(exception, "Unhandled exception");
             else
@@ -58,16 +59,16 @@ namespace StudyHub.API.Common
             {
                 Status = statusCode,
                 Title = title,
-                // لا نسرّب تفاصيل الاستثناءات غير المتوقعة للعميل
+                // Nothing of an unexpected exception is leaked to the client
                 Detail = statusCode == StatusCodes.Status500InternalServerError
                     ? "An unexpected error occurred."
                     : exception.Message
             };
 
-            // أخطاء الحقول تُرجَع مجمّعة باسم الحقل
+            // Field errors are returned grouped by field name
             if (exception is ValidationException validationException)
             {
-                // نص الاستثناء الخام تفريغ داخلي؛ القناة الصحيحة هي errors
+                // The raw exception text is an internal dump; the right channel is errors
                 problemDetails.Detail = "One or more validation errors occurred.";
                 problemDetails.Extensions["errors"] = validationException.Errors
                     .GroupBy(e => e.PropertyName)

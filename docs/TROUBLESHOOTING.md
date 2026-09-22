@@ -200,6 +200,11 @@ A record of every technical problem hit during development, how it was fixed, an
 **Fix**: Start it with the environment set: `ASPNETCORE_ENVIRONMENT=Development dotnet run --project StudyHub.API --no-launch-profile --urls ...`. The application then started, logged `AI provider in use: FakeAiService.` and served every M8 request.
 **Why**: User secrets are only added to configuration in the Development environment, and `--no-launch-profile` discards the profile that sets it, so the environment silently became Production. A configuration value is not "set" in the abstract: it is set *for one environment*, and skipping the launch profile skips everything the profile was providing.
 
+### B11. The test host's configuration arrived too late to be seen (M10)
+**Problem**: The first run of the integration suite failed on every test with `Database connection string is not configured.`, although `WebApplicationFactory` supplied one. `ConfigureWebHost` added it with `ConfigureAppConfiguration`, and with the minimal hosting model `Program.cs` reads `builder.Configuration` while the host is being created — before that callback runs.
+**Fix**: The test host supplies every value with `builder.UseSetting(key, value)`, which is part of the configuration from the start, so `AddInfrastructureServices` sees it.
+**Why**: The same shape as B3: two configuration paths that look interchangeable are not. With top-level statements the application's own startup code runs *inside* host creation, so anything it reads has to exist before the builder is built, not merely before the first request.
+
 ---
 
 ## C. Git
@@ -293,6 +298,11 @@ BC.HashPassword(password, WorkFactor);
 **Fix**: Constraint changed to `where TRequest : notnull`. `ValidationBehaviorTests` sends an invalid `LogoutCommand` through a real service provider — it failed before the fix and passes after.
 **Why**: Microsoft's container treats an open generic whose constraint does not match as "not registered", without an error. Handler tests call the handler directly and cannot see the pipeline, so a wiring rule needs a test that goes through the container.
 
+### D11. A test package pulled a dependency with known vulnerabilities (M10)
+**Problem**: Adding `Testcontainers.PostgreSql` 4.7.0 made `dotnet restore` print `NU1903` twice: its transitive `SSH.NET` 2024.2.0 carries two high-severity advisories. Nothing failed — restore and build both succeeded with warnings.
+**Fix**: Took the latest stable, 4.15.0, which resolves `SSH.NET` 2026.0.0; restore is clean. `dotnet list package --include-transitive` confirmed the graph.
+**Why**: A package's advisories are not only its own. A version pinned from memory is a version chosen without looking at what it drags in, and restore warnings are easy to scroll past — read them, and check the transitive graph rather than the direct reference.
+
 ---
 
 ## E. EF Core Migrations
@@ -361,6 +371,11 @@ BC.HashPassword(password, WorkFactor);
 **Why**: On Windows a running process locks its own DLLs, so only the project whose output it runs fails to build; the test projects build into other folders and stay green. A green `dotnet test` next to a red build is therefore a sign of a locked file, not of broken code. A server started for a manual check belongs to that check and should be stopped when it ends.
 **Repeat (M8.1)**: The same lock, a day later: a `StudyHub.API` started on 18 September (the owner's first real Gemini call) still held port 5158, so the M8.1 baseline build failed with `MSB3027`/`MSB3021` while all 185 tests passed. Identified with `Get-NetTCPConnection -LocalPort 5158` and `Win32_Process` (its creation date and its path under `StudyHub.API/bin`), stopped, rebuilt clean. Checking the port before the first build is now Step 0 of every plan for this reason.
 
+### F8. Two alarming lines in the container log that are not faults (M10)
+**Problem**: The first container run logged `Cannot load library libgssapi_krb5.so.2` with `Error: ... cannot open shared object file`, and `Failed to determine the https port for redirect`. Both look like failures; neither is. The API registered, logged in and served the dashboard over port 8080 throughout.
+**Fix**: Nothing to fix. The first is Npgsql probing for Kerberos support the ASP.NET runtime image does not ship, which it does not need for password authentication; the second is `UseHttpsRedirection` finding no HTTPS port, expected where TLS is terminated elsewhere. Both are recorded in the README's common-problems table so the next reader does not chase them.
+**Why**: A container log is the first place a deployment is judged, and a message written at error level by a library is not the same as a failed request. Judge it by what the caller got: three successful calls say more than two frightening lines.
+
 ---
 
 ## G. Testing
@@ -387,6 +402,21 @@ BC.HashPassword(password, WorkFactor);
 **Why**: A proof that mutates shared state is a test without teardown. Reverting one of two mutations is the common case, not forgetting both: the first revert makes the cleanup feel finished. Two cheaper habits: one throwaway account per proof session, and reading the *first* red result rather than the noisiest one — the chained-request errors here were consequences, and chasing them would have cost an hour on a file that was correct.
 
 **Repeat (M9)**: `ADM3` deactivated the shared `other@test.com`, which `A5`, `M7-18`, `M8-8` and `M8-9` log in as, so one run of the admin section broke all four. The admin requests now consume their own account, `adm-target@test.com`, and `other@test.com` was checked in `psql` and found still active, so no reactivation was needed.
+
+### G6. An interceptor registered in DI was never called (M10)
+**Problem**: The statement counter read **0** after a request that had obviously queried the database. It was registered as `services.AddSingleton<IInterceptor>(counter)` in the test host, which is the documented way — for singleton interceptors. A `DbCommandInterceptor` is not one, so EF never resolved it, and every "this endpoint costs N statements" assertion would have passed against a counter that counts nothing.
+**Fix**: Attached it to the context's own options instead: `services.ConfigureDbContext<StudyHubDbContext>(o => o.AddInterceptors(counter))`.
+**Why**: The bug was caught only because the suite's first test asserts a number known independently — `/api/auth/me` costs exactly one statement (M8.1). **Calibrate an instrument against a known value before trusting what it measures**, or a broken measurement becomes a passing test suite.
+
+### G7. A date formatted with the machine's culture became a Hijri year (M10)
+**Problem**: A dashboard test failed because a task due one minute *after* the urgent window appeared in the urgent list. The due dates it sent were `1448-04-13T20:59:00Z`: `ToString("yyyy-MM-ddTHH:mm:ss")` uses the current culture, which on this machine is Umm al-Qura, so the year came out Hijri. The API accepted them without complaint — a date in the year 1448 is a valid past date, which also made both tasks overdue and therefore urgent.
+**Fix**: `ToString(format, CultureInfo.InvariantCulture)` in the test helper. A grep confirmed the application code formats no date this way; its timestamps go out through `System.Text.Json`, which is culture-independent.
+**Why**: A format string does not pin the calendar — the culture does. Anything that crosses a boundary (JSON, SQL, a URL, a file name) is formatted with `InvariantCulture`, and a test whose *input* is wrong fails in a way that looks like a bug in the code under test.
+
+### G8. A concurrency test's own chain died between rounds (M10)
+**Problem**: `Refresh_TwoParallelRequestsWithOneToken_ShouldNeverBothSucceed` passed, then failed a later run with "0 winners" in a middle round. The cause was the system working as designed: when the losing request arrives *after* the rotation, it is read as reuse, and reuse detection revokes **every** session the user has (§9.3) — including the token the round had just won, which the next round then presented.
+**Fix**: The test logs in again after any round whose loser got 401, and carries on with a fresh chain.
+**Why**: A test that drives a system through its own defence mechanisms has to account for what those defences do to its fixtures. A flaky result was the first clue, and the honest explanation was in the requirements, not in the test framework.
 
 ---
 

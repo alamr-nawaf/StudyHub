@@ -1,7 +1,9 @@
 ﻿namespace StudyHub.Application.Common.Exceptions;
 
-// يُرمى حين يتعارض الطلب مع حالة قائمة في البيانات — إيميل مكرر اليوم،
-// وسيُضاف إليه تعارض تزامن من M6. يُترجَم في GlobalExceptionHandler إلى 409.
+/// <summary>
+/// Thrown when a well-formed request conflicts with the state of the data: a duplicate
+/// e-mail, a parent at maximum depth, or a lost concurrency race. Translated to 409.
+/// </summary>
 public class ConflictException : Exception
 {
     public ConflictException(string message) : base(message) { }

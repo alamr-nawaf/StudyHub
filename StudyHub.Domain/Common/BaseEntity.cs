@@ -1,6 +1,8 @@
 ﻿namespace StudyHub.Domain.Common;
 
-// الأساس المشترك لكل الكيانات: معرّف ووقت إنشاء فقط
+/// <summary>
+/// The common base of every entity: an id and a creation instant, nothing more.
+/// </summary>
 public abstract class BaseEntity
 {
     public Guid Id { get; init; } = Guid.NewGuid();

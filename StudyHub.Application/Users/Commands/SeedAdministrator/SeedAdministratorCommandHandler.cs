@@ -5,9 +5,12 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Users.Commands.SeedAdministrator;
 
-// يحلّ محلّ UPDATE اليدوي (§9.4) الذي كان يتجاوز PromoteToAdmin ويترك UpdatedAt فارغًا.
-// آمن للتكرار عند كل إقلاع: الحساب القائم يُرقّى فقط، وكلمة مروره لا تُمسّ أبدًا —
-// وإلا لأعادت الإعدادات القديمة تعيين كلمة مرور غيّرها صاحبها
+/// <summary>
+/// Creates or promotes the first administrator from configuration. It replaces the manual
+/// UPDATE of §9.4, which bypassed PromoteToAdmin and left UpdatedAt unstamped. Safe to run at
+/// every startup: an existing account is only promoted, and its password is never touched —
+/// otherwise stale configuration would reset a password its owner has since changed.
+/// </summary>
 public class SeedAdministratorCommandHandler
     : IRequestHandler<SeedAdministratorCommand, SeedAdministratorResult>
 {
@@ -37,7 +40,8 @@ public class SeedAdministratorCommandHandler
 
         if (user is null)
         {
-            // خطأ إعدادات عند الإقلاع لا طلب HTTP: يوقف التشغيل برسالة تسمّي المفتاح الناقص
+            // A configuration error at startup, not an HTTP request: it stops the process
+            // with a message naming the missing key
             if (request.FullName is null || request.Password is null)
                 throw new InvalidOperationException(
                     "No account exists for AdminSeed:Email, so AdminSeed:FullName and AdminSeed:Password are required.");
@@ -53,7 +57,7 @@ public class SeedAdministratorCommandHandler
 
         user.PromoteToAdmin();
 
-        // حفظ واحد: لا يوجد حساب أُنشئ ولم يُرقَّ
+        // One save, so there is no state in which the account was created but not promoted
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return new SeedAdministratorResult(user.Id, created, user.IsActive);

@@ -6,7 +6,7 @@ using DomainRefreshToken = StudyHub.Domain.Entities.RefreshToken;
 
 namespace StudyHub.Application.Tests.Auth.Commands.Logout;
 
-// يثبت أن الخروج صامت في كل الحالات، وأنه لا يشغّل كشف إعادة الاستخدام
+// Proves that logout is silent in every case, and that it never triggers reuse detection
 public class LogoutCommandHandlerTests
 {
     private const string Raw = "raw-token";
@@ -41,7 +41,7 @@ public class LogoutCommandHandlerTests
         await _handler.Handle(new LogoutCommand(Raw), CancellationToken.None);
 
         token.RevokedAt.Should().NotBeNull();
-        token.ReplacedByTokenId.Should().BeNull();   // خروج لا تدوير
+        token.ReplacedByTokenId.Should().BeNull();   // a logout, not a rotation
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -64,7 +64,8 @@ public class LogoutCommandHandlerTests
         token.Revoke(DateTime.UtcNow);
         StoredIs(token);
 
-        // لا يرمي — الفحص يمنع InvalidOperationException من Revoke
+        // It does not throw: the IsActive check keeps Revoke from raising
+        // InvalidOperationException
         await _handler.Handle(new LogoutCommand(Raw), CancellationToken.None);
 
         _refreshTokens.Verify(r => r.RevokeAllForUserAsync(

@@ -4,8 +4,9 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Application.Tests.Tasks.Commands.UpdateTaskSchedule;
 
-// قاعدة UTC لها فرع null، فتحتاج إثباتًا لكل فرع: حذفها لا يكسر بناءً ولا اختبار معالِج.
-// وnull في Priority يعني حقلًا غائبًا لا قيمة مقصودة، بعكس null في DueDate
+// The UTC rule has a null branch, so each branch needs its own proof: deleting the rule breaks
+// no build and no handler test. And null in Priority means an absent field rather than a
+// deliberate value, the opposite of null in DueDate
 public class UpdateTaskScheduleCommandValidatorTests
 {
     private readonly UpdateTaskScheduleCommandValidator _validator = new();
@@ -43,7 +44,7 @@ public class UpdateTaskScheduleCommandValidatorTests
         result.ShouldNotHaveValidationErrorFor(x => x.DueDate);
     }
 
-    // ما يصل من "+03:00" في الـ JSON
+    // What arrives from a "+03:00" value in the JSON
     [Fact]
     public void Validate_DueDateLocal_ShouldFail()
     {
@@ -54,7 +55,7 @@ public class UpdateTaskScheduleCommandValidatorTests
         result.ShouldHaveValidationErrorFor(x => x.DueDate);
     }
 
-    // ما يصل من تاريخ بلا إزاحة إطلاقًا
+    // What arrives from a date with no offset at all
     [Fact]
     public void Validate_DueDateUnspecified_ShouldFail()
     {
@@ -65,7 +66,7 @@ public class UpdateTaskScheduleCommandValidatorTests
         result.ShouldHaveValidationErrorFor(x => x.DueDate);
     }
 
-    // null يمسح التاريخ، وهو طلب صحيح لا خطأ
+    // null clears the date, which is a valid request rather than an error
     [Fact]
     public void Validate_DueDateNull_ShouldPass()
     {

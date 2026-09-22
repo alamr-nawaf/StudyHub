@@ -16,8 +16,9 @@ public class UserQueries : IUserQueries
     public async Task<CurrentUserDto?> GetCurrentAsync(
         Guid userId, DateTime monthStartUtc, CancellationToken cancellationToken)
     {
-        // Email يُسقَط كائنًا كاملًا عبر المحوّل، ويُقرأ Value بعد وصوله للذاكرة:
-        // EF لا يعرف أعضاء كائن القيمة، فلا ترجمة لـ Email.Value داخل الاستعلام (D6)
+        // Email is projected as the whole value object through the converter, and Value is
+        // read once it is in memory: EF knows nothing of a value object's members, so
+        // Email.Value cannot be translated inside the query (D6)
         var row = await _context.Users
             .Where(u => u.Id == userId)
             .Select(u => new

@@ -1,5 +1,8 @@
 ﻿namespace StudyHub.Domain.Entities;
 
+/// <summary>
+/// A note: text a user keeps, and the only kind of item the AI endpoints read.
+/// </summary>
 public sealed class Note : Item
 {
     private Note() { }

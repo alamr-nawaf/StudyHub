@@ -24,7 +24,8 @@ public class CourseQueries : ICourseQueries
         Guid userId, int page, int pageSize, CancellationToken cancellationToken) =>
         _context.Courses
             .Where(c => c.UserId == userId)
-            // Id بعد CreatedAt: صفّان بالوقت نفسه يبقى ترتيبهما ثابتًا بين الصفحات
+            // Id after CreatedAt: two rows sharing an instant then keep a stable order from
+            // one page to the next
             .OrderByDescending(c => c.CreatedAt)
             .ThenBy(c => c.Id)
             .ToDto()

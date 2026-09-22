@@ -7,7 +7,8 @@ namespace StudyHub.Application.Common.Validation;
 /// </summary>
 public static class UtcDateRuleExtensions
 {
-    // Npgsql لا يكتب إلا UTC؛ الرفض هنا 400 يشرح نفسه بدل 500 عند الحفظ
+    // Npgsql writes nothing but UTC, so refusing here is a 400 that explains itself instead
+    // of a 500 at save time
     public static IRuleBuilderOptions<T, DateTime?> UtcOrNull<T>(this IRuleBuilder<T, DateTime?> rule) =>
         rule
             .Must(d => d is null || d.Value.Kind == DateTimeKind.Utc)

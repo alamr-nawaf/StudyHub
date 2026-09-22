@@ -9,8 +9,9 @@ public class UpdateTaskStatusCommandValidator : AbstractValidator<UpdateTaskStat
 {
     public UpdateTaskStatusCommandValidator()
     {
-        // NotNull قبل IsInEnum: الحقل الغائب يُرفض بـ 400 بدل أن يصير Pending بصمت.
-        // والتعداد رقم في الـ JSON، فقيمة 99 تمرّ بلا IsInEnum
+        // NotNull before IsInEnum: an absent field is refused with a 400 instead of silently
+        // becoming Pending (A24). And an enum is a number in JSON, so a value of 99 would pass
+        // without IsInEnum
         RuleFor(x => x.Status)
             .Cascade(CascadeMode.Stop)
             .NotNull()

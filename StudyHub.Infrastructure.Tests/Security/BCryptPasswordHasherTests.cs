@@ -3,8 +3,9 @@ using StudyHub.Infrastructure.Security;
 
 namespace StudyHub.Infrastructure.Tests.Security;
 
-// يثبت الحالتين اللتين سبّبتا D4 و D5: هاش مخزَّن تالف يجب أن يُرفَض لا أن يُسقط الطلب،
-// وحدّ الـ 72 بايت في BCrypt يجب أن يكون مُلغى بفضل النسخة Enhanced
+// Proves the two cases behind D4 and D5: a corrupt stored hash must be rejected rather than
+// bring the request down, and BCrypt's 72-byte truncation must be gone thanks to the Enhanced
+// variant
 public class BCryptPasswordHasherTests
 {
     private readonly BCryptPasswordHasher _hasher = new();
@@ -29,7 +30,8 @@ public class BCryptPasswordHasherTests
         result.Should().BeFalse();
     }
 
-    // D4: الهاش التالف في القاعدة له جوابان صحيحان فقط — صح أو خطأ، لا استثناء
+    // D4: a corrupt hash in the database has only two correct answers — true or false, never
+    // an exception
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -44,7 +46,8 @@ public class BCryptPasswordHasherTests
         act().Should().BeFalse();
     }
 
-    // D5: كلمتان تشتركان في أول 72 بايت — القياسية تخلط بينهما، والمحسّنة لا
+    // D5: two passwords sharing their first 72 bytes — the standard variant confuses them, the
+    // enhanced one does not
     [Fact]
     public void Verify_PasswordSharingFirst72Bytes_ShouldReturnFalse()
     {

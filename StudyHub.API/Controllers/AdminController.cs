@@ -8,6 +8,9 @@ namespace StudyHub.API.Controllers;
 
 [ApiController]
 [Route("api/admin/users")]
+/// <summary>
+/// The administrative endpoints (UC-09), guarded by permission rather than by ownership.
+/// </summary>
 public class AdminController : ControllerBase
 {
     private readonly IMediator _mediator;

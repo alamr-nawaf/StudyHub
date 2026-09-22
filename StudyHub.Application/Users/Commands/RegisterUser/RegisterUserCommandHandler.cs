@@ -6,6 +6,10 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Users.Commands.RegisterUser;
 
+/// <summary>
+/// Creates an account with the configured default AI quota, and refuses an e-mail that is
+/// already taken.
+/// </summary>
 public class RegisterUserCommandHandler : IRequestHandler<RegisterUserCommand, Guid>
 {
     private readonly IUserRepository _userRepository;
@@ -27,7 +31,8 @@ public class RegisterUserCommandHandler : IRequestHandler<RegisterUserCommand, G
 
     public async Task<Guid> Handle(RegisterUserCommand request, CancellationToken cancellationToken)
     {
-        // الفحص المسبق للرسالة اللطيفة؛ القيد الفريد في القاعدة هو الحماية الحقيقية
+        // The pre-check exists for the friendly message; the unique index in the database is
+        // the real protection
         if (await _userRepository.EmailExistsAsync(request.Email, cancellationToken))
             throw new ConflictException("An account with this email already exists.");
 

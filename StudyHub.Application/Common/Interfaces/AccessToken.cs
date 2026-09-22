@@ -1,4 +1,7 @@
 ﻿namespace StudyHub.Application.Common.Interfaces;
 
-// التوكن ولحظة انتهائه معًا — منها يُحسب expiresIn في رد الدخول والتجديد (المتطلبات §8)
+/// <summary>
+/// An access token together with the instant it expires; expiresIn in the login and refresh
+/// responses is computed from it (Requirements §8).
+/// </summary>
 public sealed record AccessToken(string Value, DateTime ExpiresAt);

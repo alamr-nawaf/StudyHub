@@ -1,7 +1,9 @@
 ﻿namespace StudyHub.Domain.Authorization;
 
-// أسماء الصلاحيات كثوابت: الدومين يملكها، وASP.NET Core يستهلكها كأسماء policies —
-// نص عادي، فلا اعتمادية تدخل الدومين (ADR-31)
+/// <summary>
+/// The permission names as constants. The Domain owns them and ASP.NET Core consumes them
+/// as policy names — plain strings, so no dependency enters the Domain (ADR-31).
+/// </summary>
 public static class Permissions
 {
     public const string UsersDeactivate = "users:deactivate";

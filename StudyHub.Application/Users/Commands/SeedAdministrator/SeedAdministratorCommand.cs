@@ -2,8 +2,10 @@ using MediatR;
 
 namespace StudyHub.Application.Users.Commands.SeedAdministrator;
 
-// يُرسَل مرة عند الإقلاع من إعدادات AdminSeed، لا من أي endpoint.
-// FullName وPassword لازمان فقط حين لا يوجد حساب بهذا الإيميل بعد
+/// <summary>
+/// Sent once at startup from the AdminSeed configuration, never from an endpoint. FullName
+/// and Password are needed only when no account with that e-mail exists yet.
+/// </summary>
 public record SeedAdministratorCommand(
     string Email,
     string? FullName,

@@ -8,6 +8,9 @@ namespace StudyHub.API.Controllers;
 
 [ApiController]
 [Route("api/tasks")]
+/// <summary>
+/// Tasks: creation, and the two partial updates of status and schedule.
+/// </summary>
 public class TasksController : ControllerBase
 {
     private readonly IMediator _mediator;
@@ -23,7 +26,8 @@ public class TasksController : ControllerBase
         return Created($"/api/tasks/{taskId}", new { taskId });
     }
 
-    // المعرّف من المسار لا من الجسم: with يكتب فوق أي id أرسله العميل
+    // The id comes from the route, not from the body: `with` overwrites whatever id the
+    // client sent
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(
         Guid id,

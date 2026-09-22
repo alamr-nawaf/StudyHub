@@ -4,6 +4,10 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Infrastructure.Data;
 
+/// <summary>
+/// The one EF Core context. Nothing outside Infrastructure touches it, and every mapping is
+/// Fluent API in a configuration class of its own.
+/// </summary>
 public class StudyHubDbContext : DbContext
 {
     public StudyHubDbContext(DbContextOptions<StudyHubDbContext> options)
@@ -11,7 +15,7 @@ public class StudyHubDbContext : DbContext
     {
     }
 
-    // تعريف الجداول (DbSets)
+    // The tables
     public DbSet<User> Users => Set<User>();
     public DbSet<Course> Courses => Set<Course>();
     public DbSet<Item> Items => Set<Item>();

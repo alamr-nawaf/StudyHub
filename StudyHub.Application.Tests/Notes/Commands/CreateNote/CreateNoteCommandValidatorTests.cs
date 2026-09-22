@@ -4,7 +4,7 @@ using Xunit;
 
 namespace StudyHub.Application.Tests.Notes;
 
-// الملاحظة بلا DueDate، فتبقى قاعدة وراثة الكورس وحدها
+// A note has no DueDate, so the course-inheritance rule is the only conditional one left
 public class CreateNoteCommandValidatorTests
 {
     private readonly CreateNoteCommandValidator _validator = new();

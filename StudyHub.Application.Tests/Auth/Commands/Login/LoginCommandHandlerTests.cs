@@ -8,7 +8,7 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Application.Tests.Auth.Commands.Login;
 
-// يثبت قواعد §9.2 الأربع، وأن الفشل لا يحفظ شيئًا
+// Proves the four rules of §9.2, and that a failure saves nothing
 public class LoginCommandHandlerTests
 {
     private const string DummyHash = "$2a$12$dummy";
@@ -56,7 +56,7 @@ public class LoginCommandHandlerTests
         result.TokenType.Should().Be("Bearer");
         result.ExpiresIn.Should().Be(900);
 
-        // المحفوظ هاش لا خام
+        // What is stored is the hash, never the raw token
         _refreshTokens.Verify(r => r.Add(It.Is<RefreshToken>(
             t => t.TokenHash == "hash" && t.UserId == user.Id)), Times.Once);
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -87,7 +87,7 @@ public class LoginCommandHandlerTests
 
         await act.Should().ThrowAsync<InvalidCredentialsException>();
 
-        // إثبات القاعدة 3: Verify نُفِّذت على الوهمي رغم غياب المستخدم
+        // Rule 3 proven: Verify ran against the dummy hash even though no user was found
         _hasher.Verify(h => h.Verify("Whatever123", DummyHash), Times.Once);
     }
 

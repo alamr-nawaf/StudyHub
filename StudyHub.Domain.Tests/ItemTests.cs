@@ -9,7 +9,7 @@ public class ItemTests
     private static readonly Guid OwnerId = Guid.NewGuid();
     private static readonly Guid StrangerId = Guid.NewGuid();
 
-    // يبني سلسلة متداخلة ويرجع أعمق عقدة فيها
+    // Builds a nested chain and returns its deepest node
     private static Item BuildChain(int depth)
     {
         var node = Note.Create(OwnerId, "level 0");
@@ -54,7 +54,8 @@ public class ItemTests
         var courseId = Guid.NewGuid();
         var parent = Note.Create(OwnerId, "Parent", courseId: courseId);
 
-        // نمرّر كورسًا آخر عمدًا — يجب أن يُتجاهل لصالح كورس الأب
+        // A different course is passed on purpose: it must be ignored in favour of the
+        // parent's course
         var child = Note.Create(OwnerId, "Child", parent: parent, courseId: Guid.NewGuid());
 
         child.CourseId.Should().Be(courseId);

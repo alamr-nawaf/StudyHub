@@ -5,8 +5,10 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Auth.Commands.Login;
 
-// يطبّق قواعد الدخول الأربع في §9.2: نص واحد لكل فشل، وفحص IsActive قبل أي توكن،
-// وVerify في كل مسار، ولا تسجيل لكلمة المرور
+/// <summary>
+/// Applies the four login rules of §9.2: one message for every failure, IsActive checked
+/// before any token is issued, Verify called on every path, and the password never logged.
+/// </summary>
 public class LoginCommandHandler : IRequestHandler<LoginCommand, LoginResult>
 {
     private readonly IUserRepository _userRepository;
@@ -31,17 +33,18 @@ public class LoginCommandHandler : IRequestHandler<LoginCommand, LoginResult>
 
     public async Task<LoginResult> Handle(LoginCommand request, CancellationToken cancellationToken)
     {
-        // لحظة واحدة للتوكنين معًا فلا ينحرفان
+        // One instant for both tokens, so their lifetimes cannot drift apart
         var utcNow = DateTime.UtcNow;
 
         var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
 
-        // تُستدعى دائمًا، حتى بلا مستخدم — القاعدة 3
+        // Always called, even when no user was found — rule 3. Skipping it would make an
+        // unknown e-mail measurably faster to answer than a wrong password
         var passwordMatches = _passwordHasher.Verify(
             request.Password,
             user?.PasswordHash ?? _passwordHasher.DummyHash);
 
-        // شرط واحد لثلاثة أسباب: لا فرع يستطيع أن يرمي نصًا مختلفًا
+        // One condition for three reasons, so no branch can answer with a different message
         if (user is null || !passwordMatches || !user.IsActive)
             throw new InvalidCredentialsException();
 

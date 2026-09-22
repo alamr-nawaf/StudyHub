@@ -8,8 +8,9 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Application.Tests.Auth.Commands.Refresh;
 
-// يثبت ترتيب §9.3: الملغى بالتدوير يُطلق الإلغاء الجماعي، والملغى بالخروج والمنتهي لا،
-// وأن الإلغاء الجماعي لا يعتمد على نجاح الحفظ
+// Proves the order of §9.3: a token revoked by rotation triggers the mass revocation, while
+// one revoked by logout and an expired one do not — and that the mass revocation does not
+// depend on the save succeeding
 public class RefreshTokenCommandHandlerTests
 {
     private const string Raw = "raw-token";
@@ -65,7 +66,7 @@ public class RefreshTokenCommandHandlerTests
         added.Should().NotBeNull();
         added!.TokenHash.Should().Be("new-hash");
 
-        // القديم ملغى ومربوط بالجديد
+        // The old token is revoked and linked to the new one
         old.RevokedAt.Should().NotBeNull();
         old.ReplacedByTokenId.Should().Be(added.Id);
 
@@ -92,7 +93,7 @@ public class RefreshTokenCommandHandlerTests
 
         await act.Should().ThrowAsync<InvalidCredentialsException>();
 
-        // الانتهاء ليس سرقة: لا إلغاء جماعي
+        // Expiry is not a theft: no mass revocation
         _refreshTokens.Verify(r => r.RevokeAllForUserAsync(
             It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -115,7 +116,7 @@ public class RefreshTokenCommandHandlerTests
 
         await act.Should().ThrowAsync<InvalidCredentialsException>();
 
-        // نُفِّذ قبل الرمي، لا بعده
+        // It ran before the throw, not after it
         revokeAllCalled.Should().BeTrue();
     }
 
@@ -130,7 +131,8 @@ public class RefreshTokenCommandHandlerTests
 
         await act.Should().ThrowAsync<InvalidCredentialsException>();
 
-        // سلسلة ميتة لا تُسرق: إلغاء جماعي هنا يجعل أي توكن قديم زرّ خروج من كل الأجهزة
+        // A dead chain cannot be stolen from: a mass revocation here would turn any old token
+        // into a sign-out-everywhere button (A23)
         _refreshTokens.Verify(r => r.RevokeAllForUserAsync(
             It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
         _unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -147,7 +149,8 @@ public class RefreshTokenCommandHandlerTests
                           _user.Id, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
                       .Returns(Task.CompletedTask);
 
-        // لو مرّ الإلغاء الجماعي بوحدة العمل لضاع كله عند تعارض تزامن على صف آخر
+        // Had the mass revocation gone through the unit of work, it would have been lost
+        // entirely to a concurrency conflict on another row
         _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()))
                    .ThrowsAsync(new ConflictException("concurrency"));
 

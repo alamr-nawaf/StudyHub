@@ -1,6 +1,8 @@
-using MediatR;
+﻿using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using StudyHub.API.Common;
 using StudyHub.Application.Auth.Commands.Login;
 using StudyHub.Application.Auth.Commands.Logout;
 using StudyHub.Application.Auth.Commands.Refresh;
@@ -11,12 +13,18 @@ namespace StudyHub.API.Controllers;
 
 [ApiController]
 [Route("api/auth")]
+/// <summary>
+/// Registration, the credential endpoints and the caller's own profile.
+/// </summary>
 public class AuthController : ControllerBase
 {
     private readonly IMediator _mediator;
 
     public AuthController(IMediator mediator) => _mediator = mediator;
 
+    // Credential endpoints are where enumeration and password guessing happen, and an
+    // anonymous caller has no key but its address (ADR-45, §9.4)
+    [EnableRateLimiting(RateLimitingSettings.AuthPolicy)]
     [AllowAnonymous]
     [HttpPost("register")]
     public async Task<IActionResult> Register(
@@ -27,6 +35,7 @@ public class AuthController : ControllerBase
         return Created($"/api/users/{userId}", new { userId });
     }
 
+    [EnableRateLimiting(RateLimitingSettings.AuthPolicy)]
     [AllowAnonymous]
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginCommand command, CancellationToken cancellationToken)
@@ -35,7 +44,9 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
-    // مجهول عمدًا: توكن الوصول غالبًا منتهٍ حين يُحتاج التجديد (§8، الحاشية 1)
+    // Anonymous by design: the access token it replaces has usually already expired, so
+    // requiring one would make this endpoint useless exactly when it is needed (§8)
+    [EnableRateLimiting(RateLimitingSettings.AuthPolicy)]
     [AllowAnonymous]
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh(RefreshTokenCommand command, CancellationToken cancellationToken)
@@ -44,7 +55,7 @@ public class AuthController : ControllerBase
         return Ok(result);
     }
 
-    // محمي بالسياسة الافتراضية: المعالِج يقارن مالك التوكن بـ sub (§9.3)
+    // Protected by the fallback policy: the handler compares the token's owner with sub (§9.3)
     [HttpPost("logout")]
     public async Task<IActionResult> Logout(LogoutCommand command, CancellationToken cancellationToken)
     {
@@ -52,7 +63,8 @@ public class AuthController : ControllerBase
         return NoContent();
     }
 
-    // محمي بالسياسة الافتراضية. الاسم والبريد من القاعدة لا من التوكن، فالتوكن لا يحملهما (ADR-21)
+    // Protected by the fallback policy. The name and e-mail come from the database, not from
+    // the token, which deliberately does not carry them (ADR-21)
     [HttpGet("me")]
     public async Task<IActionResult> Me(CancellationToken cancellationToken)
     {

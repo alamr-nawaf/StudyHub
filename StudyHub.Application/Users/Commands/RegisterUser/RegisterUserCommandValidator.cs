@@ -3,6 +3,10 @@ using StudyHub.Application.Common.Validation;
 
 namespace StudyHub.Application.Users.Commands.RegisterUser;
 
+/// <summary>
+/// Validates <see cref="RegisterUserCommand"/>, including the password policy shared with
+/// administrator seeding.
+/// </summary>
 public class RegisterUserCommandValidator : AbstractValidator<RegisterUserCommand>
 {
     public RegisterUserCommandValidator()

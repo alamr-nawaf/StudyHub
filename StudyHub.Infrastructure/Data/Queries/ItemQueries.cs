@@ -15,7 +15,7 @@ public class ItemQueries : IItemQueries
 
     public ItemQueries(StudyHubDbContext context) => _context = context;
 
-    // Items لا Notes ولا Tasks: المعرّف قد يخص أيًّا منهما
+    // Items, not Notes or Tasks: the id may belong to either kind
     public Task<Guid?> GetOwnerIdAsync(Guid itemId, CancellationToken cancellationToken) =>
         _context.Items
             .Where(i => i.Id == itemId)
@@ -32,7 +32,8 @@ public class ItemQueries : IItemQueries
         Guid userId, int page, int pageSize, CancellationToken cancellationToken) =>
         _context.Items
             .Where(i => i.UserId == userId && i.ParentItemId == null && i.CourseId == null)
-            // الترتيب قبل الإسقاط: EF لا يرى ما داخل مُنشئ الـ DTO، فلا يترجم ترتيبًا عليه
+            // Order before projecting: EF cannot see inside the DTO's constructor, so it
+            // cannot translate an order written on it
             .OrderByDescending(i => i.CreatedAt)
             .ThenBy(i => i.Id)
             .ToDto()
@@ -48,8 +49,10 @@ public class ItemQueries : IItemQueries
         var subtree = new List<ItemDto> { root };
         var currentLevel = new List<Guid> { root.Id };
 
-        // جملة لكل مستوى لا WITH RECURSIVE: العمق محدود بخمسة، ومرشّح الحذف يبقى مطبَّقًا (ADR-11).
-        // الحد من عمق الجذر لا من الصفر: عنصر في العمق 3 لا يملك إلا مستوى أبناء واحدًا
+        // One statement per level rather than WITH RECURSIVE: the depth is capped at five, and
+        // the soft-delete filter keeps applying, which raw recursive SQL would bypass (ADR-11).
+        // The bound counts from the root's own depth, not from zero: an item at depth 3 can
+        // only have one level of children left
         for (var depth = root.Depth; depth < Item.MaxDepth && currentLevel.Count > 0; depth++)
         {
             var children = await _context.Items
@@ -59,7 +62,8 @@ public class ItemQueries : IItemQueries
                 .ToDto()
                 .ToListAsync(cancellationToken);
 
-            // المستويات تُضاف بالترتيب، فالقائمة مرتّبة بالعمق دون فرز في الذاكرة
+            // The levels are appended in order, so the list comes out sorted by depth with no
+            // in-memory sort
             subtree.AddRange(children);
             currentLevel = children.Select(c => c.Id).ToList();
         }

@@ -6,4 +6,5 @@
   <Project Path="StudyHub.Domain/StudyHub.Domain.csproj" />
   <Project Path="StudyHub.Infrastructure.Tests/StudyHub.Infrastructure.Tests.csproj" />
   <Project Path="StudyHub.Infrastructure/StudyHub.Infrastructure.csproj" />
+  <Project Path="StudyHub.IntegrationTests/StudyHub.IntegrationTests.csproj" />
 </Solution>

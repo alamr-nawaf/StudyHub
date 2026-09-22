@@ -19,6 +19,7 @@ public class GetCoursesQueryHandler : IRequestHandler<GetCoursesQuery, PagedResu
     }
 
     public Task<PagedResult<CourseDto>> Handle(GetCoursesQuery request, CancellationToken cancellationToken) =>
-        // المستخدم من التوكن لا من الطلب: القائمة لا يمكن أن تُطلب باسم غيرك
+        // The user comes from the token, not from the request: a list cannot be asked for in
+        // somebody else's name
         _courseQueries.GetPageAsync(_currentUser.UserId, request.Page, request.PageSize, cancellationToken);
 }

@@ -6,11 +6,13 @@ using StudyHub.Infrastructure.Authentication;
 
 namespace StudyHub.Infrastructure.Tests.Authentication;
 
-// يثبت أن التوكن يحمل الـ claims المقرّرة في المتطلبات §9.1 ولا شيء غيرها،
-// وأن مدّته تأتي من الإعدادات، وأن هاش التجديد حتمي وبطول العمود
+// Proves that the token carries the claims Requirements §9.1 fixes and nothing else, that its
+// lifetime comes from configuration, and that the refresh hash is deterministic and exactly as
+// long as its column
 public class TokenServiceTests
 {
-    // لحظة بلا كسور ثانية: حقل exp في التوكن ثوانٍ صحيحة، فأي جزء منها يضيع
+    // An instant with no fractional seconds: the token's exp field is whole seconds, so any
+    // fraction of one is lost
     private static readonly DateTime UtcNow = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
 
     private readonly TokenService _service = new(Options.Create(new JwtSettings

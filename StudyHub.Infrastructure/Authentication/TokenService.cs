@@ -8,11 +8,14 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Infrastructure.Authentication;
 
-// يصنع توكن الوصول الموقّع، وتوكن التجديد العشوائي، وهاشه الحتمي.
-// القواعد من المتطلبات §9.1: ثلاثة claims لا غير، وHS256، والمدّة من الإعدادات
+/// <summary>
+/// Makes the signed access token, the random refresh token and its deterministic hash. The
+/// rules are those of Requirements §9.1: three claims and no more, HS256, and the lifetime
+/// from configuration.
+/// </summary>
 public sealed class TokenService : ITokenService
 {
-    // المعالِج عديم الحالة وآمن للتوازي — نسخة واحدة تكفي التطبيق كله
+    // The handler is stateless and thread-safe, so one instance serves the whole application
     private static readonly JsonWebTokenHandler Handler = new();
 
     private readonly JwtSettings _settings;
@@ -31,7 +34,8 @@ public sealed class TokenService : ITokenService
             NotBefore = utcNow,
             Expires = expiresAt,
 
-            // قاموس لا ClaimsIdentity: الأسماء تُكتب حرفيًا كما هنا
+            // A dictionary rather than a ClaimsIdentity: the names are written exactly as
+            // they appear here, with no inbound mapping to long URIs
             Claims = new Dictionary<string, object>
             {
                 [JwtRegisteredClaimNames.Sub] = userId.ToString(),

@@ -2,7 +2,10 @@ using FluentValidation;
 
 namespace StudyHub.Application.Common.Validation;
 
-// سياسة كلمة المرور في مكان واحد: التسجيل وبذر المسؤول يفرضانها معًا، ونسختان منها تنحرفان
+/// <summary>
+/// The password policy in one place. Registration and administrator seeding both enforce it,
+/// and two copies of a policy drift apart.
+/// </summary>
 public static class PasswordRuleExtensions
 {
     public static IRuleBuilderOptions<T, string> StrongPassword<T>(this IRuleBuilder<T, string> rule) =>

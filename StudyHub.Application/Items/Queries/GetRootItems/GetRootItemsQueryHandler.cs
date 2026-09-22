@@ -19,6 +19,7 @@ public class GetRootItemsQueryHandler : IRequestHandler<GetRootItemsQuery, Paged
     }
 
     public Task<PagedResult<ItemDto>> Handle(GetRootItemsQuery request, CancellationToken cancellationToken) =>
-        // المستخدم من التوكن لا من الطلب، فالقائمة لا يمكن أن تُطلب باسم غيرك
+        // The user comes from the token, not from the request: a list cannot be asked for in
+        // somebody else's name
         _itemQueries.GetRootPageAsync(_currentUser.UserId, request.Page, request.PageSize, cancellationToken);
 }

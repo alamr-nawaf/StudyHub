@@ -67,7 +67,7 @@ public class SeedAdministratorCommandHandlerTests
         existing.PasswordHash.Should().Be("original-hash");
         result.Created.Should().BeFalse();
 
-        // إعدادات قديمة لا تعيد تعيين كلمة مرور غيّرها صاحبها
+        // Stale configuration must not reset a password its owner has since changed
         _passwordHasherMock.Verify(h => h.Hash(It.IsAny<string>()), Times.Never);
         _userRepositoryMock.Verify(r => r.Add(It.IsAny<User>()), Times.Never);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);

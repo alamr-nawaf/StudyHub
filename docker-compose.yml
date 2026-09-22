@@ -13,6 +13,31 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    # The API waits for this, not for the container to exist: PostgreSQL accepts
+    # connections seconds after the process starts, and a first request that arrives
+    # before it does is a 500 with nothing wrong with the code
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d StudyHubDb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: studyhub_api
+    ports:
+      - "8080:8080"
+    environment:
+      # Production, so nothing tries to read user secrets, which exist only in
+      # Development (B10). Every secret comes from .env instead (ADR-47)
+      ASPNETCORE_ENVIRONMENT: Production
+    # Git-ignored, never committed; .env.example documents the names without values
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:

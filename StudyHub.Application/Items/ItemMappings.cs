@@ -11,8 +11,9 @@ public static class ItemMappings
     public const int NoteKind = 0;
     public const int TaskKind = 1;
 
-    // Kind مميِّز TPH لا خاصية على الكيان، فيُشتق من النوع نفسه: EF يترجم "is TaskItem" إلى فحص العمود.
-    // حقول المهمة null للملاحظة، مثل أعمدتها في القاعدة (§3.1)
+    // Kind is the TPH discriminator rather than a property on the entity, so it is derived
+    // from the type itself: EF translates "is TaskItem" into a check on the column. The task
+    // fields are null for a note, exactly as their columns are in the database (§3.1)
     public static IQueryable<ItemDto> ToDto(this IQueryable<Item> items) =>
         items.Select(i => new ItemDto(
             i.Id,

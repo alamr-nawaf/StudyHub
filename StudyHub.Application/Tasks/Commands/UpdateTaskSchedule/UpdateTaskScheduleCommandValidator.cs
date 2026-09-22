@@ -10,7 +10,8 @@ public class UpdateTaskScheduleCommandValidator : AbstractValidator<UpdateTaskSc
 {
     public UpdateTaskScheduleCommandValidator()
     {
-        // NotNull قبل IsInEnum: الحقل الغائب يُرفض بـ 400 بدل أن يصير Low بصمت
+        // NotNull before IsInEnum: an absent field is refused with a 400 instead of silently
+        // becoming Low (A24)
         RuleFor(x => x.Priority)
             .Cascade(CascadeMode.Stop)
             .NotNull()

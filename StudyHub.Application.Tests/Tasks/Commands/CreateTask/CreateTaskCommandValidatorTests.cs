@@ -4,8 +4,8 @@ using Xunit;
 
 namespace StudyHub.Application.Tests.Tasks;
 
-// قاعدتان شرطيتان لا يحميهما شيء آخر: وراثة الكورس من الأب، وحصر التاريخ في UTC.
-// حذف أيٍّ منهما لا يكسر بناءً ولا اختبار معالِج
+// Two conditional rules that nothing else guards: inheriting the course from the parent, and
+// restricting the date to UTC. Deleting either breaks no build and no handler test
 public class CreateTaskCommandValidatorTests
 {
     private readonly CreateTaskCommandValidator _validator = new();
@@ -34,7 +34,7 @@ public class CreateTaskCommandValidatorTests
         result.ShouldNotHaveValidationErrorFor(x => x.DueDate);
     }
 
-    // ما يصل من "+03:00" في الـ JSON
+    // What arrives from a "+03:00" value in the JSON
     [Fact]
     public void Validate_DueDateLocal_ShouldFail()
     {
@@ -45,7 +45,8 @@ public class CreateTaskCommandValidatorTests
         result.ShouldHaveValidationErrorFor(x => x.DueDate);
     }
 
-    // ما يصل من تاريخ بلا إزاحة إطلاقًا — أخطرها، لأنه ليس لحظة زمنية أصلًا
+    // What arrives from a date with no offset at all — the worst of the three, because it is
+    // not an instant in time in the first place
     [Fact]
     public void Validate_DueDateUnspecified_ShouldFail()
     {

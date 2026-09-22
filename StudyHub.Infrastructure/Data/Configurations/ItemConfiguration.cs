@@ -4,27 +4,32 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Infrastructure.Data.Configurations;
 
+/// <summary>
+/// Maps the single Items table that holds both notes and tasks through TPH, with the check
+/// constraints that keep a row honest whatever writes it.
+/// </summary>
 public class ItemConfiguration : IEntityTypeConfiguration<Item>
 {
     public void Configure(EntityTypeBuilder<Item> builder)
     {
         builder.ToTable("Items", t =>
         {
-            // خمسة مستويات: صفر إلى أربعة
+            // Five levels, 0 through 4
             t.HasCheckConstraint("CK_Item_Depth", "\"Depth\" BETWEEN 0 AND 4");
 
-            // الأب فارغ إذا وفقط إذا كان العمق صفرًا
+            // The parent is null if and only if the depth is zero
             t.HasCheckConstraint("CK_Item_RootDepth",
                 "(\"ParentItemId\" IS NULL) = (\"Depth\" = 0)");
 
-            // حقول المهمة تُملأ في المهام وحدها
+            // The task fields are filled on tasks and on nothing else
             t.HasCheckConstraint("CK_Item_TaskFields",
                 "(\"Kind\" = 1) = (\"Status\" IS NOT NULL AND \"Priority\" IS NOT NULL)");
 
-            // العنوان يحوي محرفًا واحدًا على الأقل ليس مسافة
+            // The title holds at least one character that is not whitespace
             t.HasCheckConstraint("CK_Item_Title", "\"Title\" ~ '\\S'");
 
-            // جديد: القيمة نفسها لا وجودها فقط
+            // The value itself, not merely its presence: an enum is an int in the database,
+            // so nothing but a constraint keeps 99 out
             t.HasCheckConstraint("CK_Item_StatusValue",
                 "\"Status\" IS NULL OR \"Status\" BETWEEN 0 AND 2");
 
@@ -34,7 +39,8 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
 
         builder.HasKey(i => i.Id);
 
-        // المميِّز رقم لا نص: إعادة تسمية الصنف لا تُفسد الصفوف المخزَّنة
+        // The discriminator is an int, not a string: renaming the class then leaves the
+        // stored rows intact
         builder.HasDiscriminator<int>("Kind")
                .HasValue<Note>(0)
                .HasValue<TaskItem>(1);
@@ -53,7 +59,7 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
                .HasForeignKey(i => i.CourseId)
                .OnDelete(DeleteBehavior.Restrict);
 
-        // مفتاح أجنبي ذاتي: الأب عنصر آخر في نفس الجدول
+        // A self-referencing foreign key: the parent is another row of this same table
         builder.HasOne<Item>()
                .WithMany()
                .HasForeignKey(i => i.ParentItemId)

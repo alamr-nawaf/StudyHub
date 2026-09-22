@@ -3,16 +3,15 @@
 > This document explains **how** StudyHub is built and **why**, so anyone opening this repository — including "future you" in six months — can understand it without re-reading every commit.
 >
 > For **what** the system does (use cases, business rules, schema, roadmap), see [`Requirements.md`](Requirements.md).
-> For **code style rules**, see [`CODING_STANDARDS.md`](CODING_STANDARDS.md).
 > For **problems hit and how they were fixed**, see [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 >
-> **v3.0** — aligned with `Requirements.md` v3.0. It follows the same reading convention: a statement tagged with a milestone — *(M6)*, *(M7)* — describes something not built yet; an untagged statement describes code that exists today. (v2.0 was the rewrite after the M5 restructure, when the `Notes` and `Tasks` tables of v1 disappeared.)
+> **v3.1** — aligned with `Requirements.md` v3.1: every milestone is complete, and this document describes the system as built. A milestone named in the text — *(M6)*, *(M10)* — says where something was built, never that it is missing.
 
 ---
 
 ## 1. What Is This Project
 
-StudyHub is a backend API for managing courses, notes, and tasks, with AI summaries of notes and AI-suggested tasks extracted from them — suggestions the user approves before anything is written.
+StudyHub is a backend API for managing courses, notes, and tasks, with AI summaries of notes and AI-suggested tasks extracted from them — suggestions the user approves before anything is written. The API also serves one demo page from `wwwroot`, so the whole system can be tried in a browser (Requirements ADR-48).
 
 It is a **personal learning project**. The goal is to practise professional .NET backend patterns correctly — Clean Architecture, CQRS, rich domain models, real schema constraints, and a disciplined verification habit — not to ship the fastest possible MVP.
 
@@ -31,7 +30,7 @@ StudyHub/
 ├── StudyHub.Domain.Tests       → Unit tests for entity rules.
 ├── StudyHub.Application.Tests  → Unit tests for handlers, dependencies mocked.
 ├── StudyHub.Infrastructure.Tests → Unit tests for infrastructure code that needs no database.
-└── docs/                       → Requirements, architecture, standards, troubleshooting, ERD.
+└── docs/                       → Requirements, architecture, troubleshooting.
 ```
 
 **The dependency rule**: arrows only point inward.
@@ -158,11 +157,11 @@ Moq fakes the interfaces declared in Application, so a test like "creating an it
 
 `StudyHub.Infrastructure.Tests` covers infrastructure code that needs no database — password hashing and token generation. Application tests never reference Infrastructure; the tests follow the same dependency rule as the code.
 
-**Not automated yet**: EF Core queries and HTTP round-trips need integration testing against a containerized database — scheduled for M10.
+`StudyHub.IntegrationTests` covers what the unit suites cannot see: it hosts the real API in-process and runs it against a throwaway PostgreSQL container, so the SQL, the soft-delete filter, the dashboard's statement budget, rate limiting and the concurrency token are executed for real (§4.8, Requirements ADR-44).
 
-### Containerization — Docker Compose (PostgreSQL only)
+### Containerization — Docker Compose
 
-Guarantees an identical Postgres version everywhere without a local install. The API itself is **not yet containerized**; it runs via `dotnet run`.
+Guarantees an identical Postgres version everywhere without a local install. The API runs either with `dotnet run` or as a second compose service built from the repository's `Dockerfile`, with its secrets in a git-ignored `.env` (§4.8, Requirements ADR-47).
 
 ---
 
@@ -407,6 +406,25 @@ GET /api/dashboard
 
 **404, not a dashboard of zeros**, when the token is valid but the account row is gone. Zeros are an answer; for an account that does not exist they would be a false one, and `GET /api/auth/me` already answers the same way.
 
+### 4.8 The request pipeline, the cleanup job and the container (M10)
+
+**The pipeline, in the order the middleware runs:**
+
+```
+UseExceptionHandler → (MapOpenApi, Development only) → UseHttpsRedirection
+  → UseAuthentication → UseAuthorization → UseRateLimiter → MapControllers
+```
+
+**`UseRateLimiter` sits after `UseAuthorization`, and the order is the behaviour.** The `ai` policy partitions by the `sub` claim, which only exists once authentication has run; placed earlier, every AI caller would fall into one anonymous partition and the first user to spend the budget would lock out everybody else. There is an integration test for exactly that — `AiLimit_OneUserSpent_ShouldNotLimitAnother` — because the mistake compiles, starts and serves requests happily (the same shape as B1 and B5).
+
+Two policies, both fixed-window and both configured (ADR-45). `auth` — register, login, refresh — partitions by client address, because an anonymous caller has no other key; it is the brake on the enumeration risk §9.4 records. `ai` — summarize, extract-tasks — partitions by user, because those two calls cost money. A refused request is **429 with `Retry-After`**, not the middleware's default 503, which would blame the server for the caller's haste; the body is `ProblemDetails` titled `Too many requests.`, deliberately different from the monthly quota's 429 so a client can tell "slow down" from "your month is spent".
+
+**The cleanup job is a trigger, not a rule.** `RefreshTokenCleanupService` is a `BackgroundService` that runs once at startup and then on a `PeriodicTimer`; all it does is open a scope and send `PurgeExpiredRefreshTokensCommand`. The retention rule — delete a row 7 days after it **expires**, never because it was revoked — lives in the handler, where a unit test can reach it (ADR-46). Two details are deliberate: the service is a singleton and `DbContext` is scoped, so each run creates its own scope; and every run is wrapped in a `try`, because since .NET 8 an exception escaping a `BackgroundService` stops the whole host — a cleanup that cannot reach the database must never take the API down with it.
+
+**Deleting a revoked row early would break reuse detection.** §9.3 recognises a stolen token by finding the rotated-away row when it is presented again. Delete that row and the same request becomes "unknown token" — a plain 401, with no chain revocation. Expiry plus a margin is therefore the earliest safe moment, and `RevokedAt` is never part of the condition.
+
+**The container.** Two stages: the SDK image restores and publishes, the ASP.NET runtime image carries only the output. The runtime is the Debian-based image on purpose — Alpine and the chiselled images ship no time-zone database, and startup refuses a `BusinessTime:TimeZoneId` the machine cannot resolve (ADR-40), so the API would not start at all. It runs as `$APP_UID`, not root, and listens on 8080. Compose adds it beside PostgreSQL: the API waits for `service_healthy`, not merely for the container to exist, because PostgreSQL accepts connections seconds after its process starts. Configuration comes from a git-ignored `.env` through `env_file`, because user secrets exist only in Development (B10); `.env.example` is committed and names the keys without values (ADR-47). `UseHttpsRedirection` stays in the pipeline and logs that it found no HTTPS port — expected in a container that terminates TLS elsewhere.
+
 ---
 
 ## 5. The `Items` Table and TPH
@@ -546,76 +564,20 @@ Requirements §10 adds two consequences: a proof belongs to the layer where the 
 
 ---
 
-## 8. Getting Started
+## 8. Running It
 
-```bash
-# 1. Start PostgreSQL
-docker compose up -d
-
-# 2. Store the connection string for the running app (one time)
-cd StudyHub.API
-dotnet user-secrets init
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" \
-  "Host=localhost;Port=5432;Database=StudyHubDb;Username=postgres;Password=YourSecurePassword"
-cd ..
-
-# 3. Store the JWT signing key — the app refuses to start without one of at least 32 bytes
-#    PowerShell 5.1 and 7 both:
-#      $bytes = New-Object byte[] 48
-#      [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-#      dotnet user-secrets set "Jwt:Key" ([Convert]::ToBase64String($bytes))
-
-# 3b. Optional — seed the first administrator on the next start (Requirements §9.4)
-#      dotnet user-secrets set "AdminSeed:Email" "admin@example.com"
-#      dotnet user-secrets set "AdminSeed:FullName" "Administrator"
-#      dotnet user-secrets set "AdminSeed:Password" "<meets the registration policy>"
-#    Once the startup log says the administrator was created:
-#      dotnet user-secrets remove "AdminSeed:Password"
-
-# 3c. Optional — the AI provider. Without a key the application starts with the fake
-#     provider and both AI endpoints work offline; the startup log names which one is live
-#      dotnet user-secrets set "Ai:ApiKey" "<the provider key>"
-#      dotnet user-secrets set "Ai:Model" "<the model name>"
-#    Everything else under "Ai" is non-secret and lives in appsettings.json
-
-# 4. Set the environment variable for design-time commands (per terminal session)
-#    PowerShell:  $env:STUDYHUB_DB_CONNECTION = "Host=localhost;..."
-#    cmd.exe:     set "STUDYHUB_DB_CONNECTION=Host=localhost;..."
-
-# 5. Apply the schema
-dotnet ef database update --project StudyHub.Infrastructure --startup-project StudyHub.API
-
-# 6. Run
-dotnet run --project StudyHub.API
-
-# 7. Test the business logic
-dotnet test
-```
+How to install, configure, run and test the project is in the [`README`](../README.md), and only there: two copies of the same instructions drift apart. One point belongs here, because it is about how the system is built rather than how to start it.
 
 ### Two configuration paths that are not interchangeable
 
 | Path | Reads from |
 |---|---|
-| The running app | `appsettings` → user secrets → DI |
+| The running app | `appsettings` → user secrets (Development) or environment variables (the container) → DI |
 | `dotnet ef` commands | `IDesignTimeDbContextFactory` → `STUDYHUB_DB_CONNECTION` |
 
 **Migration commands succeeding says nothing about whether the app is configured**, and vice versa. Both must be set up, and only running the app tests the first.
 
 The design-time factory has **no fallback value** — it throws with a clear message if the variable is missing. A fallback is how a password ends up committed.
-
-### Manual endpoint testing
-
-Open `StudyHub.API/StudyHub.API.http` in Visual Studio or VS Code with the REST Client extension. Send `S0` once to register the session user, then `S1` at the start of every session to log in; the later requests read the access token from `S1`'s response.
-
-### Inspecting the database directly
-
-```bash
-docker exec -it studyhub_postgres psql -U postgres -d StudyHubDb
-```
-
-**`psql` is the stronger of the two manual tools**, because it is the only view that does not pass through EF's soft-delete filter. A soft-deleted row is invisible to the API and plainly visible here.
-
-Paste one statement per line — a multi-line paste can merge with the previous statement and produce a syntax error that looks exactly like a constraint rejection.
 
 ---
 
@@ -633,13 +595,15 @@ Documented on purpose. A learning project is more useful when its gaps are visib
 - **Node moving is not supported.** Three other decisions — stored depth, inherited `CourseId`, and the absence of cycle detection — are safe *only* because of this. Adding moving invalidates all three at once.
 - **Correct restore is impossible as designed.** After a cascade delete, nothing distinguishes a child deleted deliberately from one deleted by cascade. Fixing it means `DeletedAt` plus `DeletedBatchId` instead of `IsDeleted` — deferred, because the project is not deployed and no real data will make it expensive (ADR-25, Requirements §12).
 - **Repository + Unit of Work over EF Core is technically redundant.** `DbContext` is already a unit of work and `DbSet<T>` already a repository. Kept because the pattern is worth learning, at the cost of an extra abstraction and the loss of `IQueryable` composition at the boundary — so read queries project inside Infrastructure, through read-side query interfaces (Requirements ADR-32).
+- **The recent-courses statement repeats its correlated `max(...)` subquery six times** — three in the projection, three in the `ORDER BY` — as EF Core translates the conditional. It is still one statement (ADR-42), but PostgreSQL evaluates the aggregate per course per repetition: invisible at five courses, the first thing to measure at hundreds per user.
+- **The demo page's Tasks tab reads every course tree** — one request per course, plus one per standalone root — because the API has no "all my tasks" endpoint and the dashboard shows only what is urgent (Requirements §15.4). Fine for a person's handful of courses; a paginated endpoint replaces it the day the page becomes a product (Requirements §12).
 - **Last write wins on content edits.** Only refresh tokens get a concurrency token; two tabs editing one item overwrite each other silently (Requirements §12).
 
 ### Infrastructure
-- **No integration tests.** Infrastructure and API are covered by manual verification only. M10.
-- **The API is not containerized.** Only Postgres runs in Docker.
-- **No rate limiting.** M10.
-- **Refresh tokens are never deleted** — expired and revoked rows accumulate until the cleanup job in M10.
+- **Integration tests exist since M10** — `StudyHub.IntegrationTests` hosts the real API against a throwaway PostgreSQL container (ADR-44). What they still do not cover: the real AI provider (the suite runs on the fake one on purpose), and the container itself, which is exercised by hand.
+- **Rate limits are per process and per address.** Two instances would allow twice the traffic, and callers sharing one address share one `auth` budget. Forwarded headers are deferred (Requirements §12) because reading `X-Forwarded-For` without a trusted-proxy list is worse than not reading it.
+- **The container stores its data-protection keys inside itself.** They are not used for anything that must survive a restart — JWTs are signed with `Jwt:Key` — but the warning in the log is real, and a deployment that ever needs persistent keys must mount them.
+- **Nothing terminates TLS.** The container serves plain HTTP on 8080 and `UseHttpsRedirection` finds no HTTPS port to redirect to.
 
 Full roadmap: [`Requirements.md`](Requirements.md) §11.
 

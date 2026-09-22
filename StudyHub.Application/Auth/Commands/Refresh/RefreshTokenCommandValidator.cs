@@ -2,8 +2,11 @@
 
 namespace StudyHub.Application.Auth.Commands.Refresh;
 
+/// <summary>
+/// Presence only. No length and no format rule: a forged token is a rejected credential
+/// (401), not a malformed request (400).
+/// </summary>
 public class RefreshTokenCommandValidator : AbstractValidator<RefreshTokenCommand>
 {
-    // فارغ فقط. لا قاعدة طول ولا صيغة: توكن مزيَّف اعتمادٌ مرفوض (401) لا طلب مشوَّه (400)
     public RefreshTokenCommandValidator() => RuleFor(x => x.RefreshToken).NotEmpty();
 }

@@ -3,8 +3,11 @@ using StudyHub.Application.Common.Interfaces;
 
 namespace StudyHub.API.Common;
 
-// الهوية من claim الـ sub في توكن تحقّقت منه الوسطية.
-// طبقة التطبيق لا تتغيّر: ما زالت تسأل ICurrentUserService ولا تعرف HTTP
+/// <summary>
+/// The identity comes from the "sub" claim of a token the middleware has already validated.
+/// Application is unchanged by this: it still asks ICurrentUserService and knows nothing of
+/// HTTP.
+/// </summary>
 public class CurrentUserService : ICurrentUserService
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -16,10 +19,11 @@ public class CurrentUserService : ICurrentUserService
     {
         get
         {
-            // "sub" حرفيًا: التحويل الوارد مُطفأ، فلا اسم بديل
+            // "sub" literally: inbound claim mapping is off, so there is no alternative name
             var raw = _httpContextAccessor.HttpContext?.User.FindFirst("sub")?.Value;
 
-            // لا يقع إلا إذا مرّ توكن بلا sub — الوسطية ترفض الباقي بـ 401 قبل هنا
+            // Only reachable if a token without sub got through: the middleware refuses
+            // everything else with a 401 long before this point
             if (!Guid.TryParse(raw, out var userId))
                 throw new ForbiddenException("The token does not carry a usable user id.");
 

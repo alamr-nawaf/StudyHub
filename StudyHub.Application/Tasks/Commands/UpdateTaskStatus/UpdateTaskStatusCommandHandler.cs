@@ -26,14 +26,15 @@ public class UpdateTaskStatusCommandHandler : IRequestHandler<UpdateTaskStatusCo
 
     public async Task Handle(UpdateTaskStatusCommand request, CancellationToken cancellationToken)
     {
-        // معرّف ملاحظة على مسار مهمة: لا توجد مهمة بهذا المعرّف، فهو 404 لا 400
+        // A note's id on a task's route names no task, so it is 404 and not 400
         if (await _itemRepository.GetByIdAsync(request.Id, cancellationToken) is not TaskItem task)
             throw new NotFoundException($"Task '{request.Id}' was not found.");
 
         if (task.UserId != _currentUser.UserId)
             throw new ForbiddenException("You do not own this task.");
 
-        // ! لأن المدقّق رفض null قبل الوصول هنا (المعالِج يفترض مدخلاته صحيحة)
+        // ! because the validator refused null before this point: a handler may assume its
+        // input is already well formed
         task.UpdateStatus(request.Status!.Value);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);

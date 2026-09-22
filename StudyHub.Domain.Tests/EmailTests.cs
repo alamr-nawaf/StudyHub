@@ -4,8 +4,8 @@ using Xunit;
 
 namespace StudyHub.Domain.Tests;
 
-// الفارق بين Create و FromPersisted متعمَّد لا سهو:
-// الأولى بوابة دخول، والثانية إعادة بناء من مصدر موثوق
+// The difference between Create and FromPersisted is deliberate, not an oversight: the first
+// is a gate for input, the second rebuilds from a source that is already trusted
 public class EmailTests
 {
     [Fact]

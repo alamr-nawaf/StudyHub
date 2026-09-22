@@ -6,8 +6,10 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Application.Auth.Commands.Refresh;
 
-// يدوّر زوج التوكنات حسب §9.3: بحث بالهاش، ثم كشف إعادة استخدام، ثم انتهاء،
-// ثم حالة المستخدم، ثم تدوير بحفظ واحد
+/// <summary>
+/// Rotates the token pair in the order §9.3 lays down: look up by hash, then reuse
+/// detection, then expiry, then the user's state, then the rotation itself in one save.
+/// </summary>
 public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, LoginResult>
 {
     private readonly IRefreshTokenRepository _refreshTokenRepository;
@@ -34,45 +36,48 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, L
         var tokenHash = _tokenService.HashRefreshToken(request.RefreshToken);
         var stored = await _refreshTokenRepository.GetByHashAsync(tokenHash, cancellationToken);
 
-        // 1. غير موجود
+        // 1. Unknown
         if (stored is null)
             throw new InvalidCredentialsException();
 
-        // 2. ملغى بالتدوير = له خليفة، فمن يقدّمه الآن يحمل نسخة قديمة من سلسلة حيّة: سرقة.
-        //    الإلغاء الجماعي ينفّذ فورًا، فيُحفظ قبل الرمي.
-        //    يسبق فحص IsActive عمدًا: الاثنان "غير نشط" ولهما ردّان مختلفان
+        // 2. Revoked by rotation means it has a successor, so whoever presents it now holds
+        //    an old copy of a live chain: a theft. The mass revocation executes immediately,
+        //    so it is saved before the throw. It deliberately comes before the IsActive
+        //    check: both cases are "not active" and they deserve different answers
         if (stored.ReplacedByTokenId is not null)
         {
             await _refreshTokenRepository.RevokeAllForUserAsync(stored.UserId, utcNow, cancellationToken);
             throw new InvalidCredentialsException();
         }
 
-        // 2ب. ملغى بلا خليفة = خروج أو إلغاء جماعي سابق. السلسلة ميتة أصلًا، فلا شيء يُسرق منها.
-        //     لو أطلق إلغاءً جماعيًا لاستطاع حامل أي توكن قديم إخراج المستخدم من كل أجهزته متى شاء،
-        //     ولأخرج تجديدٌ متأخّر عن الخروج صاحبَه من أجهزته الأخرى
+        // 2b. Revoked without a successor means a logout or an earlier mass revocation. The
+        //     chain is already dead, so there is nothing left to steal from it. If this fired
+        //     a mass revocation, anyone holding an old logged-out token could sign the user
+        //     out of every device at will, and a refresh still in flight when the user tapped
+        //     logout would sign them out of their other devices
         if (stored.RevokedAt is not null)
             throw new InvalidCredentialsException();
 
-        // 3. منتهٍ: 401 وحدها — الانتهاء ليس سرقة
+        // 3. Expired: a plain 401 — running out of time is not a theft
         if (!stored.IsActive(utcNow))
             throw new InvalidCredentialsException();
 
-        // 4. الهوية من الصف المخزَّن لا من التوكن
+        // 4. The identity comes from the stored row, never from the token
         var user = await _userRepository.GetByIdAsync(stored.UserId, cancellationToken);
         if (user is null || !user.IsActive)
             throw new InvalidCredentialsException();
 
-        // 5. التدوير
+        // 5. The rotation
         var accessToken = _tokenService.GenerateAccessToken(user.Id, user.Role, utcNow);
         var refresh = _tokenService.GenerateRefreshToken(utcNow);
 
         var newToken = RefreshToken.Create(user.Id, refresh.TokenHash, refresh.ExpiresAt);
         _refreshTokenRepository.Add(newToken);
 
-        // يربط القديم بالجديد — سلسلة التدوير التي يقرأها كشف إعادة الاستخدام
+        // Links the old token to the new one: the rotation chain reuse detection reads
         stored.Revoke(utcNow, newToken.Id);
 
-        // حفظ واحد = معاملة واحدة. لا تضف معاملة صريحة (§9.3)
+        // One save is one transaction. Do not add an explicit one (§9.3)
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return new LoginResult(

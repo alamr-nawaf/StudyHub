@@ -2,6 +2,9 @@
 
 namespace StudyHub.Domain.Entities;
 
+/// <summary>
+/// A task: an item with a status, a priority and an optional due date.
+/// </summary>
 public sealed class TaskItem : Item
 {
     public StudyTaskStatus Status { get; private set; }

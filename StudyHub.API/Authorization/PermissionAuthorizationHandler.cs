@@ -4,8 +4,10 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.API.Authorization;
 
-// خريطة واحدة لمستدعيَين (§9.5): السياسة تسأل RolePermissions نفسها التي يسألها User.Can،
-// فلا قائمة صلاحيات في طبقة الـ API يمكن أن تنحرف عنها
+/// <summary>
+/// One map with two callers (§9.5): the policy asks the same RolePermissions that User.Can
+/// asks, so there is no second list of permissions in the API layer that could drift from it.
+/// </summary>
 public sealed class PermissionAuthorizationHandler : AuthorizationHandler<PermissionRequirement>
 {
     protected override Task HandleRequirementAsync(
@@ -14,8 +16,9 @@ public sealed class PermissionAuthorizationHandler : AuthorizationHandler<Permis
     {
         var raw = context.User.FindFirst("role")?.Value;
 
-        // الاسم حرفيًا فقط: Enum.TryParse يقبل "1" و"admin" أيضًا، والتوكن لا يُصدر إلا الاسم.
-        // claim مجهول أو غائب لا يفشل بخطأ — لا يمنح شيئًا، فيصير 403
+        // The literal name only: Enum.TryParse would also accept "1" and "admin", while the
+        // token never issues anything but the name. An unknown or absent claim does not fail
+        // with an error — it simply grants nothing, which becomes a 403
         if (Enum.TryParse<UserRole>(raw, out var role)
             && role.ToString() == raw
             && RolePermissions.Has(role, requirement.Permission))

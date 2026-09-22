@@ -15,11 +15,16 @@ using System.Text;
 
 namespace StudyHub.Infrastructure.DependencyInjection;
 
+/// <summary>
+/// Wires everything Infrastructure implements: the context, the repositories and read-side
+/// queries, the security services, the settings that are validated at startup, and the AI
+/// provider.
+/// </summary>
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
-        // سحب نص الاتصال من الإعدادات بأمان
+        // The connection string comes from configuration, and its absence stops startup
         var connectionString = configuration.GetConnectionString("DefaultConnection");
 
         if (string.IsNullOrEmpty(connectionString))
@@ -31,12 +36,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
-        // جانب القراءة منفصل عن المستودعات: المستودع يحمّل كيانات للأوامر، والاستعلام يُسقط DTO (ADR-32)
+        // The read side is separate from the repositories: a repository loads entities for
+        // commands, a query projects DTOs (ADR-32)
         services.AddScoped<ICourseQueries, CourseQueries>();
         services.AddScoped<IItemQueries, ItemQueries>();
         services.AddScoped<IUserQueries, UserQueries>();
         services.AddScoped<IDashboardQueries, DashboardQueries>();
-        // تسجيل الـ DbContext مع محرك PostgreSQL
+        // The DbContext, on the PostgreSQL provider
         services.AddDbContext<StudyHubDbContext>(options =>
             options.UseNpgsql(connectionString));
 
@@ -50,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
         services.AddSingleton(ReadUserQuotaSettings(configuration));
+        services.AddSingleton(ReadRefreshTokenCleanupSettings(configuration));
         services.AddSingleton(new BusinessCalendar(ReadBusinessTimeZone(configuration)));
         services.AddAiProvider(configuration);
 
@@ -98,6 +105,23 @@ public static class ServiceCollectionExtensions
         var defaultMonthlyTokens = Positive(section, "DefaultMonthlyTokens");
 
         return new UserQuotaSettings(defaultMonthlyTokens);
+    }
+
+    // Read once at startup like every other setting. A cleanup that never runs, or runs
+    // with a retention of zero, is a data-loss bug found long after the value was written,
+    // so both numbers are refused here rather than defaulted (ADR-46).
+    private static RefreshTokenCleanupSettings ReadRefreshTokenCleanupSettings(IConfiguration configuration)
+    {
+        var section = configuration.GetSection(RefreshTokenCleanupSettings.SectionName);
+
+        // Absent means enabled: the cleanup is the normal state, and turning it off is the
+        // deliberate act that has to be written down
+        var enabled = section.GetValue<bool?>("Enabled") ?? true;
+
+        return new RefreshTokenCleanupSettings(
+            enabled,
+            Positive(section, "IntervalHours"),
+            Positive(section, "RetentionDaysAfterExpiry"));
     }
 
     // Read once at startup like every other setting: an unknown zone found on the first

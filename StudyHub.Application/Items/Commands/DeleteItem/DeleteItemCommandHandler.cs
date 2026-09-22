@@ -4,6 +4,9 @@ using StudyHub.Application.Common.Interfaces;
 
 namespace StudyHub.Application.Items.Commands.DeleteItem;
 
+/// <summary>
+/// Soft-deletes one of the current user's items together with everything below it.
+/// </summary>
 public class DeleteItemCommandHandler : IRequestHandler<DeleteItemCommand>
 {
     private readonly IItemRepository _itemRepository;
@@ -25,7 +28,8 @@ public class DeleteItemCommandHandler : IRequestHandler<DeleteItemCommand>
         var item = await _itemRepository.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"Item '{request.Id}' was not found.");
 
-        // فحص الجذر وحده يكفي: الكيان يفرض أن مالك الابن هو مالك الأب
+        // Checking the root alone is enough: the entity enforces that a child's owner is its
+        // parent's owner (rule 3.2.6)
         if (item.UserId != _currentUser.UserId)
             throw new ForbiddenException("You do not own this item.");
 
@@ -34,7 +38,7 @@ public class DeleteItemCommandHandler : IRequestHandler<DeleteItemCommand>
         foreach (var node in subtree)
             node.MarkAsDeleted();
 
-        // حفظ واحد = معاملة واحدة: إما الشجرة كاملة أو لا شيء منها
+        // One save is one transaction: either the whole tree goes or none of it does
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 }

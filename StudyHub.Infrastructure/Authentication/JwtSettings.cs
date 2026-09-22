@@ -1,7 +1,10 @@
 ﻿namespace StudyHub.Infrastructure.Authentication;
 
-// إعدادات إصدار التوكن والتحقق منه في مكان واحد. المفتاح لا يُكتب في appsettings أبدًا،
-// بل في user-secrets (CODING_STANDARDS §11)، والمدّتان من المتطلبات §9.1
+/// <summary>
+/// Everything needed to issue and to validate a token, in one place. The key is never
+/// written into appsettings: it lives in user secrets (CODING_STANDARDS §11), and the two
+/// lifetimes come from Requirements §9.1.
+/// </summary>
 public sealed class JwtSettings
 {
     public const string SectionName = "Jwt";

@@ -2,15 +2,19 @@
 
 namespace StudyHub.Application.Common.Interfaces;
 
-// ITokenService: التطبيق يطلب توكنات وهاشات، والبنية التحتية تعرف كيف تُصنع.
-// الدور وسيط لأن claim الدور جزء من التوكن (المتطلبات §9.1 القرار 5، وADR-21)
+/// <summary>
+/// Application asks for tokens and hashes; Infrastructure knows how they are made. The role
+/// is passed in because the role claim is part of the token (Requirements §9.1, ADR-21).
+/// </summary>
 public interface ITokenService
 {
     AccessToken GenerateAccessToken(Guid userId, UserRole role, DateTime utcNow);
 
-    // الخام والهاش والصلاحية من نداء واحد؛ الخام وحده يُعطى للعميل ولا يُخزَّن أبدًا
+    // The raw token, its hash and its expiry from one call; only the raw one is handed to
+    // the client, and it is never stored
     RefreshTokenResult GenerateRefreshToken(DateTime utcNow);
 
-    // SHA-256 بصيغة hex: 64 محرفًا تطابق طول العمود في RefreshTokenConfiguration
+    // SHA-256 in hex: 64 characters, which is exactly the column length declared in
+    // RefreshTokenConfiguration
     string HashRefreshToken(string rawToken);
 }

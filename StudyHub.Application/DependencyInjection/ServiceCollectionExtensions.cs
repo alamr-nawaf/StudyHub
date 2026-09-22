@@ -5,12 +5,17 @@ using StudyHub.Application.Common.Behaviors;
 
 namespace StudyHub.Application.DependencyInjection;
 
+/// <summary>
+/// Registers everything the Application layer owns: MediatR, the validators, and the
+/// validation behaviour that runs them.
+/// </summary>
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
-        // رسائل FluentValidation الافتراضية تُترجَم حسب ثقافة الجهاز، فيتغيّر جسم الرد
-        // بتغيّر الخادم. العقد في §8 لا يعرف لغة — نثبّته على الإنجليزية
+        // FluentValidation's default messages are translated according to the machine's
+        // culture, so the response body would change with the server it runs on. The contract
+        // in §8 has no language: it is pinned to English here
         ValidatorOptions.Global.LanguageManager.Enabled = false;
         services.AddMediatR(cfg =>
             cfg.RegisterServicesFromAssembly(typeof(ServiceCollectionExtensions).Assembly));

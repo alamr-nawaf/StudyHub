@@ -7,7 +7,8 @@ namespace StudyHub.Application.Courses;
 /// </summary>
 public static class CourseMappings
 {
-    // على IQueryable لا على الكيان: الإسقاط يصير SELECT للأعمدة المطلوبة، ولا يُحمَّل كيان أبدًا (§6)
+    // On IQueryable, not on the entity: the projection becomes a SELECT of exactly these
+    // columns, and no entity is ever materialized (§6)
     public static IQueryable<CourseDto> ToDto(this IQueryable<Course> courses) =>
         courses.Select(c => new CourseDto(
             c.Id,

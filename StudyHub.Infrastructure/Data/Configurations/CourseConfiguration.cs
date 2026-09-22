@@ -4,6 +4,9 @@ using StudyHub.Domain.Entities;
 
 namespace StudyHub.Infrastructure.Data.Configurations;
 
+/// <summary>
+/// Maps courses: the title constraint, the soft-delete filter and the owner relationship.
+/// </summary>
 public class CourseConfiguration : IEntityTypeConfiguration<Course>
 {
     public void Configure(EntityTypeBuilder<Course> builder)
@@ -12,7 +15,7 @@ public class CourseConfiguration : IEntityTypeConfiguration<Course>
         builder.Property(c => c.Title).IsRequired().HasMaxLength(200);
         builder.HasQueryFilter(c => !c.IsDeleted);
 
-        // نفس قيد العنوان في Items — الجدولان يتبعان نفس القاعدة الآن
+        // The same title constraint as Items: both tables now follow one rule
         builder.ToTable("Courses", t =>
             t.HasCheckConstraint("CK_Course_Title", "\"Title\" ~ '\\S'"));
 

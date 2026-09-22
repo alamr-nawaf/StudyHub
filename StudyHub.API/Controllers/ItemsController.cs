@@ -9,7 +9,10 @@ using StudyHub.Application.Items.Queries.GetRootItems;
 
 namespace StudyHub.API.Controllers;
 
-// متحكّم واحد لما لا يفرّق بين ملاحظة ومهمة: القراءة وتعديل المحتوى والحذف
+/// <summary>
+/// One controller for everything that does not care whether an item is a note or a task:
+/// reading, editing the content, and deleting.
+/// </summary>
 [ApiController]
 [Route("api/items")]
 public class ItemsController : ControllerBase
@@ -18,7 +21,7 @@ public class ItemsController : ControllerBase
 
     public ItemsController(IMediator mediator) => _mediator = mediator;
 
-    // العناصر المستقلة فقط؛ ما تحت كورس يُقرأ من شجرة الكورس
+    // Standalone items only; what sits under a course is read from that course's tree
     [HttpGet]
     public async Task<IActionResult> GetRootPage(
         int page = 1,
@@ -43,7 +46,8 @@ public class ItemsController : ControllerBase
         return Ok(tree);
     }
 
-    // المعرّف من المسار لا من الجسم: with يكتب فوق أي id أرسله العميل
+    // The id comes from the route, not from the body: `with` overwrites whatever id the
+    // client sent
     [HttpPatch("{id:guid}")]
     public async Task<IActionResult> UpdateContent(
         Guid id,

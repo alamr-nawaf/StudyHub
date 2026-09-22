@@ -4,11 +4,15 @@ using StudyHub.Domain.Enums;
 using StudyHub.Domain.ValueObjects;
 namespace StudyHub.Domain.Entities;
 
+/// <summary>
+/// An account: who owns every course, item and AI call in the system.
+/// </summary>
 public sealed class User : AuditableEntity
 {
     public string FullName { get; private set; } = string.Empty;
 
-    // null! لأن EF Core يستدعي المُنشئ الخاص أولًا ثم يملأ الخصائص
+    // null! because EF Core calls the private constructor first and fills the properties
+    // afterwards, so the compiler cannot see that this is ever assigned
     public Email Email { get; private set; } = null!;
 
     public string PasswordHash { get; private set; } = string.Empty;
@@ -32,7 +36,7 @@ public sealed class User : AuditableEntity
         return new User
         {
             FullName = fullName.Trim(),
-            Email = Email.Create(email),   // التطبيع والتحقق في مكان واحد
+            Email = Email.Create(email),   // normalization and validation in one place
             PasswordHash = passwordHash,
             MonthlyTokenQuota = monthlyQuota,
             IsActive = true,
@@ -48,22 +52,22 @@ public sealed class User : AuditableEntity
 
     public void Deactivate()
     {
-        if (!IsActive) return;   // عملية مُتسامحة: تعطيل المعطَّل ليس خطأ
+        if (!IsActive) return;   // tolerant: deactivating an inactive account is not an error
 
         IsActive = false;
         UpdatedAt = DateTime.UtcNow;
     }
-    // المسار الوحيد إلى Admin، ومسمّى بصوت عالٍ ليظهر في أي مراجعة.
-    // التنزيل غير مدعوم حتى تطلبه حاجة حقيقية (Requirements §12)
+    // The only path to Admin, named loudly so that it shows up in any review. Demotion is
+    // not supported until a real need asks for it (Requirements §12)
     public void PromoteToAdmin()
     {
-        if (Role == UserRole.Admin) return;   // عملية مُتسامحة مثل Deactivate
+        if (Role == UserRole.Admin) return;   // tolerant, like Deactivate
 
         Role = UserRole.Admin;
         UpdatedAt = DateTime.UtcNow;
     }
 
-    // القاعدة تُسأل من مكان واحد — نفس شكل IsAtMaxDepth (ADR-30)
+    // The rule is asked in one place, the same shape as IsAtMaxDepth (ADR-30)
     public bool Can(string permission) => RolePermissions.Has(Role, permission);
 
     public void ChangePassword(string newPasswordHash)

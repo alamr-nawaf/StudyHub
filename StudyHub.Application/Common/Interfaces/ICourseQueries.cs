@@ -8,7 +8,8 @@ namespace StudyHub.Application.Common.Interfaces;
 /// </summary>
 public interface ICourseQueries
 {
-    // null حين لا يوجد الكورس أو حُذف منطقيًا — يكفي للتفريق بين 404 و403 دون جلب الكورس كله
+    // null when the course does not exist or was soft-deleted. The owner alone is enough to
+    // tell a 404 from a 403 without loading the whole course
     Task<Guid?> GetOwnerIdAsync(Guid courseId, CancellationToken cancellationToken);
 
     Task<PagedResult<CourseDto>> GetPageAsync(Guid userId, int page, int pageSize, CancellationToken cancellationToken);

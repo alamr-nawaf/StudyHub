@@ -2,18 +2,23 @@
 
 namespace StudyHub.Application.Auth.Commands.Login;
 
+/// <summary>
+/// Shape only: what login refuses here is a malformed request, never a wrong credential.
+/// </summary>
 public class LoginCommandValidator : AbstractValidator<LoginCommand>
 {
     public LoginCommandValidator()
     {
-        // إلزامية: Email.Create ترمي على إيميل مشوَّه، فبلا هذه القاعدة يرجع 500 بدل 400
+        // Required: Email.Create throws on a malformed address, so without this rule the
+        // response would be a 500 instead of a 400
         RuleFor(x => x.Email)
             .NotEmpty()
             .EmailAddress().WithMessage("A valid email address is required.")
             .MaximumLength(150);
 
-        // لا قواعد تعقيد هنا: الدخول يقارن بالمخزَّن لا يفرض سياسة.
-        // حدّ طول أدنى يرفض كلمة مرور قديمة صحيحة بـ 400 بدل 401
+        // No complexity rules here: login compares against what is stored, it does not
+        // enforce a policy. A minimum length would refuse a correct older password with a
+        // 400 instead of letting it through
         RuleFor(x => x.Password).NotEmpty();
     }
 }

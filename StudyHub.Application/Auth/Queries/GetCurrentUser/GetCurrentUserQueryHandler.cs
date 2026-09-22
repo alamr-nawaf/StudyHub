@@ -30,7 +30,7 @@ public class GetCurrentUserQueryHandler : IRequestHandler<GetCurrentUserQuery, C
         // AI call will be measured against (ADR-39, ADR-40)
         var monthStartUtc = _calendar.MonthStartUtc(DateTime.UtcNow);
 
-        // توكن صالح لمستخدم لا صفّ له: نادر، لكنه 404 صادق لا 500
+        // A valid token for a user with no row: rare, but an honest 404 rather than a 500
         return await _userQueries.GetCurrentAsync(userId, monthStartUtc, cancellationToken)
             ?? throw new NotFoundException($"User '{userId}' was not found.");
     }

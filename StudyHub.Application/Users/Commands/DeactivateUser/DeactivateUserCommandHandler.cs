@@ -4,8 +4,12 @@ using StudyHub.Application.Common.Interfaces;
 
 namespace StudyHub.Application.Users.Commands.DeactivateUser;
 
-// UC-09. لا فحص ملكية: هذا أول معالِج يعمل على صف غيرك، وحارسه صلاحية الدور على الـ endpoint.
-// لا إلغاء لتوكنات التجديد هنا: التجديد يرفض المعطَّل (§9.3)، وتوكن الوصول يعيش مدّته فقط (§9.4)
+/// <summary>
+/// UC-09. There is no ownership check: this is the first handler that works on somebody
+/// else's row, and what guards it is the role permission on the endpoint. It revokes no
+/// refresh token either — refresh already refuses a deactivated account (§9.3), and an
+/// access token simply lives out its lifetime (§9.4).
+/// </summary>
 public class DeactivateUserCommandHandler : IRequestHandler<DeactivateUserCommand>
 {
     private readonly IUserRepository _userRepository;
@@ -22,7 +26,8 @@ public class DeactivateUserCommandHandler : IRequestHandler<DeactivateUserComman
         var user = await _userRepository.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"User '{request.Id}' was not found.");
 
-        // متسامحة: المعطَّل أصلًا يمرّ بلا خطأ، فلا يحتاج المسؤول أن يفحص أولًا
+        // Tolerant: an already-inactive account passes without an error, so an administrator
+        // does not have to check first
         user.Deactivate();
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);

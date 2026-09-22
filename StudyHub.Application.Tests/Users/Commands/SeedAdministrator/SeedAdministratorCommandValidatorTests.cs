@@ -3,7 +3,8 @@ using StudyHub.Application.Users.Commands.SeedAdministrator;
 
 namespace StudyHub.Application.Tests.Users.Commands.SeedAdministrator;
 
-// القاعدتان مشروطتان بوجود القيمة: الغياب مسموح (ترقية حساب قائم)، والحضور يخضع للسياسة
+// Both rules are conditional on the value being present: absence is allowed (promoting an
+// existing account), and what is present obeys the policy
 public class SeedAdministratorCommandValidatorTests
 {
     private readonly SeedAdministratorCommandValidator _validator = new();

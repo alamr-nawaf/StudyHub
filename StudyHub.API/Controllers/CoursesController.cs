@@ -11,6 +11,9 @@ namespace StudyHub.API.Controllers;
 
 [ApiController]
 [Route("api/courses")]
+/// <summary>
+/// Courses: creation, the caller's page of them, one course's tree, update and delete.
+/// </summary>
 public class CoursesController : ControllerBase
 {
     private readonly IMediator _mediator;
@@ -36,7 +39,7 @@ public class CoursesController : ControllerBase
         return Ok(result);
     }
 
-    // قائمة مسطّحة غير مُرقَّمة، والعميل يبني الشجرة من ParentItemId (ADR-23)
+    // A flat, unpaginated list; the client builds the tree from ParentItemId (ADR-23)
     [HttpGet("{id:guid}/tree")]
     public async Task<IActionResult> GetTree(Guid id, CancellationToken cancellationToken)
     {
@@ -44,7 +47,8 @@ public class CoursesController : ControllerBase
         return Ok(tree);
     }
 
-    // المعرّف من المسار لا من الجسم: with يكتب فوق أي id أرسله العميل
+    // The id comes from the route, not from the body: `with` overwrites whatever id the
+    // client sent
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(
         Guid id,

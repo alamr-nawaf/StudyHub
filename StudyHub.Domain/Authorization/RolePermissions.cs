@@ -2,11 +2,13 @@
 
 namespace StudyHub.Domain.Authorization;
 
-// خريطة الدور إلى قدراته. المستخدم العادي لا يملك أي صلاحية إدارية —
-// صلاحياته على بياناته تأتي من الملكية لا من الدور
+/// <summary>
+/// Maps a role to what it may do. An ordinary user holds no administrative permission at
+/// all: what they may do to their own data comes from ownership, not from their role.
+/// </summary>
 public static class RolePermissions
 {
-    // مجموعة فارغة واحدة مشتركة: لا تخصيص جديد في كل نداء
+    // One shared empty set, so no allocation happens on every call
     private static readonly IReadOnlySet<string> None = new HashSet<string>();
 
     private static readonly IReadOnlyDictionary<UserRole, IReadOnlySet<string>> Map =
@@ -22,7 +24,7 @@ public static class RolePermissions
     public static IReadOnlySet<string> For(UserRole role) =>
         Map.TryGetValue(role, out var permissions)
             ? permissions
-            : None;   // دور غير معروف لا يملك شيئًا
+            : None;   // an unknown role holds nothing
 
     public static bool Has(UserRole role, string permission) =>
         For(role).Contains(permission);

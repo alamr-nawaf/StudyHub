@@ -4,7 +4,8 @@ using StudyHub.Application.Courses.Queries.GetCourses;
 
 namespace StudyHub.Application.Tests.Courses.Queries.GetCourses;
 
-// حدود قواعد الترقيم المشتركة تُختبر هنا مرة واحدة؛ كل استعلام مُرقَّم آخر يستعمل الامتداد نفسه
+// The bounds of the shared paging rules are tested here once; every other paginated query
+// uses the same extension
 public class GetCoursesQueryValidatorTests
 {
     private readonly GetCoursesQueryValidator _validator = new();

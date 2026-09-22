@@ -23,11 +23,11 @@ public class GetItemQueryHandler : IRequestHandler<GetItemQuery, ItemDto>
         var ownerId = await _itemQueries.GetOwnerIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"Item '{request.Id}' was not found.");
 
-        // 403 مثل مسار الكتابة، والملكية تُفحص قبل جلب أي بيانات (ADR-33)
+        // 403 as on the write path, and ownership is checked before any data is fetched (ADR-33)
         if (ownerId != _currentUser.UserId)
             throw new ForbiddenException("You do not own this item.");
 
-        // null هنا يعني أنه حُذف بين الجملتين: 404 صادق لا 500
+        // null here means it was deleted between the two statements: an honest 404, not a 500
         return await _itemQueries.GetByIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"Item '{request.Id}' was not found.");
     }

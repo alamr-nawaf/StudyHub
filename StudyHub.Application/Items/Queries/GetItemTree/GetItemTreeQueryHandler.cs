@@ -23,7 +23,8 @@ public class GetItemTreeQueryHandler : IRequestHandler<GetItemTreeQuery, IReadOn
         var ownerId = await _itemQueries.GetOwnerIdAsync(request.Id, cancellationToken)
             ?? throw new NotFoundException($"Item '{request.Id}' was not found.");
 
-        // الأبناء يرثون مالك أبيهم (القاعدة 3.2.6)، ففحص الجذر وحده يكفي للشجرة كلها
+        // Children inherit their parent's owner (rule 3.2.6), so checking the root alone
+        // covers the whole tree
         if (ownerId != _currentUser.UserId)
             throw new ForbiddenException("You do not own this item.");
 

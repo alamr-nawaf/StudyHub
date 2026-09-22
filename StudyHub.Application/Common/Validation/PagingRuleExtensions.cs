@@ -8,7 +8,8 @@ namespace StudyHub.Application.Common.Validation;
 /// </summary>
 public static class PagingRuleExtensions
 {
-    // قيمة خارج المدى تُرفض بـ 400 ولا تُقصّ بصمت: العميل يجب أن يعرف أن طلبه لم يُنفَّذ كما كتبه
+    // A value out of range is refused with a 400 rather than silently clamped: the client
+    // has to know that its request was not carried out as written
     public static IRuleBuilderOptions<T, int> ValidPage<T>(this IRuleBuilder<T, int> rule) =>
         rule
             .GreaterThanOrEqualTo(1).WithMessage("Page must be at least 1.");

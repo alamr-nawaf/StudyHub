@@ -4,7 +4,8 @@ using StudyHub.Domain.Enums;
 
 namespace StudyHub.Application.Tests.Tasks.Commands.UpdateTaskStatus;
 
-// الحقل الغائب يصل كـ null، وبلا NotNull كان يصير Pending بصمت: قاعدة لا يحرسها شيء آخر
+// An absent field arrives as null, and without NotNull it silently became Pending: a rule
+// nothing else guards (A24)
 public class UpdateTaskStatusCommandValidatorTests
 {
     private readonly UpdateTaskStatusCommandValidator _validator = new();
